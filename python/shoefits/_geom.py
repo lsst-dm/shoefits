@@ -73,6 +73,9 @@ class Interval(BaseGeometry):
     def size(self) -> int:
         return self.stop - self.start
 
+    def __str__(self) -> str:
+        return f"{self.start}:{self.stop}"
+
     @classmethod
     def hull(cls, first: int | Interval, *args: int | Interval) -> Interval:
         if type(first) is Interval:
@@ -88,6 +91,10 @@ class Interval(BaseGeometry):
                 rmin = min(rmin, arg)
                 rmax = max(rmax, arg)
         return Interval(start=rmin, stop=rmax + 1)
+
+    @classmethod
+    def from_size(cls, size: int, start: int = 0) -> Interval:
+        return cls(start=start, stop=start + size)
 
     def __add__(self, other: int) -> Interval:
         return Interval(start=self.start + other, stop=self.stop + other)
@@ -116,6 +123,14 @@ class Box(BaseGeometry):
         return Point(x=self.x.max, y=self.y.max)
 
     @property
+    def start(self) -> Point:
+        return Point(x=self.x.start, y=self.y.start)
+
+    @property
+    def stop(self) -> Point:
+        return Point(x=self.x.stop, y=self.y.stop)
+
+    @property
     def size(self) -> Extent:
         return Extent(x=self.x.size, y=self.y.size)
 
@@ -129,6 +144,10 @@ class Box(BaseGeometry):
             x_args.append(arg.x)
             y_args.append(arg.y)
         return Box(x=Interval.hull(*x_args), y=Interval.hull(*y_args))
+
+    @classmethod
+    def from_size(cls, size: Extent, start: Point = Point.zero) -> Box:
+        return cls(x=Interval.from_size(size.x, start.x), y=Interval.from_size(size.y, start.y))
 
     def __add__(self, other: Extent) -> Box:
         return Box(x=self.x + other.x, y=self.y + other.y)
