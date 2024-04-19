@@ -43,6 +43,8 @@ class FrameInterface(FrameSchemaInterface, Protocol):
     @property
     def is_resolved(self) -> Literal[True]: ...
 
+    def cutout(self, box: Box) -> CutoutFrame: ...
+
 
 class GeneralFrame(GeneralFrameSchema):
     name: str
@@ -56,6 +58,9 @@ class GeneralFrame(GeneralFrameSchema):
     @property
     def is_resolved(self) -> Literal[True]:
         return True
+
+    def cutout(self, box: Box) -> CutoutFrame:
+        return CutoutFrame(parent=self, start=box.start, size=box.size)
 
 
 class DetectorFrame(DetectorFrameSchema):
@@ -80,6 +85,9 @@ class DetectorFrame(DetectorFrameSchema):
     @property
     def is_resolved(self) -> Literal[True]:
         return True
+
+    def cutout(self, box: Box) -> CutoutFrame:
+        return CutoutFrame(parent=self, start=box.start, size=box.size)
 
 
 # If we add add AmplifierFrame in the future, it could have all of the
@@ -122,9 +130,12 @@ class TractFrame(TractFrameSchema):
     def is_resolved(self) -> Literal[True]:
         return True
 
+    def cutout(self, box: Box) -> CutoutFrame:
+        return CutoutFrame(parent=self, start=box.start, size=box.size)
+
 
 _RootFrame: TypeAlias = Union[GeneralFrame, DetectorFrame, TractFrame]
-RootFrame: TypeAlias = Annotated[_RootFrame, pydantic.Field(discriminator="field_type")]
+RootFrame: TypeAlias = Annotated[_RootFrame, pydantic.Field(discriminator="schema_type")]
 
 
 class CutoutFrame(CutoutFrameSchema):
@@ -144,8 +155,17 @@ class CutoutFrame(CutoutFrameSchema):
     def is_resolved(self) -> Literal[True]:
         return True
 
+    def cutout(self, box: Box) -> CutoutFrame:
+        return CutoutFrame(parent=self.parent, start=box.start, size=box.size)
 
-Frame: TypeAlias = Annotated[Union[_RootFrame, CutoutFrame], pydantic.Field(discriminator="field_type")]
+    @property
+    def slices(self) -> tuple[slice, slice]:
+        y0 = self.start.y - self.parent.start.y
+        x0 = self.start.x - self.parent.start.x
+        return (slice(y0, y0 + self.size.y), slice(x0, x0 + self.size.x))
+
+
+Frame: TypeAlias = Annotated[Union[_RootFrame, CutoutFrame], pydantic.Field(discriminator="schema_type")]
 
 
 if TYPE_CHECKING:

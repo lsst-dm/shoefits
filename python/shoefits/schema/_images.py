@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-__all__ = ("ImageSchema", "MaskSchema")
+__all__ = ("ImageSchema", "MaskSchema", "ImagePixelType", "MaskPixelType")
 
 
 from typing import Literal, TypeAlias
@@ -11,9 +11,14 @@ from ._frames import FrameSchema
 from ._simple import IntegerType, Unit, FloatType, UnsignedIntegerType, SchemaBase
 
 
+ImagePixelType: TypeAlias = IntegerType | FloatType
+
+MaskPixelType: TypeAlias = UnsignedIntegerType
+
+
 class ImageSchema(SchemaBase):
     schema_type: Literal["image"] = "image"
-    dtype: IntegerType | FloatType
+    pixel_type: ImagePixelType
     unit: Unit | None = None
     frame: FrameSchema | None = None
 
@@ -22,7 +27,7 @@ class MaskSchema(SchemaBase):
     schema_type: Literal["mask"] = "mask"
     # {name: docs}; enumerate(planes) sets bit IDs.
     planes: dict[str, str] = pydantic.Field(default_factory=dict)
-    dtype: Literal["minimal"] | UnsignedIntegerType = "uint8"
+    pixel_type: UnsignedIntegerType = "uint8"
     frame: FrameSchema | None = None
 
 

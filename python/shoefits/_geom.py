@@ -46,6 +46,10 @@ class Extent(BaseGeometry):
 
     zero: ClassVar[Extent]
 
+    @property
+    def shape(self) -> tuple[int, int]:
+        return (self.y, self.x)
+
     def __add__(self, other: Extent) -> Extent:
         return Extent(x=self.x + other.x, y=self.y + other.y)
 
