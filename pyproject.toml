@@ -108,8 +108,7 @@ disallow_incomplete_defs = true
 strict_equality = true
 warn_unreachable = true
 warn_unused_ignores = false
-plugins = "pydantic.mypy"
 
 [[tool.mypy.overrides]]
-module = ["astropy"]
+module = ["astropy", "jsonpointer"]
 ignore_missing_imports = true
