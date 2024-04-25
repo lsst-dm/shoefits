@@ -2,6 +2,7 @@ from __future__ import annotations
 
 __all__ = ("Image", "image_field")
 
+from collections.abc import Callable
 from typing import Any, Literal
 import pydantic
 import pydantic_core.core_schema as pcs
@@ -10,9 +11,10 @@ import numpy as np
 import numpy.typing as npt
 
 
-from .schema import Unit, dtype_to_number_str, NumberType
+from ._dtypes import Unit, dtype_to_str, NumberType
 from ._geom import Box, Point
 from ._yaml import YamlModel
+from ._schema_base import FitsExportSchemaBase
 
 
 class Image:
@@ -63,21 +65,26 @@ class Image:
 
     def _serialize(self, info: pydantic.SerializationInfo) -> ImageReference:
         result = ArrayReference(
-            source="TODO!", shape=self.bbox.size.shape, datatype=dtype_to_number_str(self.array.dtype)
+            source="TODO!", shape=self.bbox.size.shape, datatype=dtype_to_str(self.array.dtype, NumberType)
         )
         if self.unit is not None:
             return ImageReference(
-                data=QuantityArrayReference(value=result, unit=self.unit), start=self.bbox.start
+                data=QuantityArrayReference(value=result, unit=self.unit),
+                start=self.bbox.start,
+                _serialize_extra=self._get_array,
             )
-        return ImageReference(data=result, start=self.bbox.start)
+        return ImageReference(data=result, start=self.bbox.start, _serialize_extra=self._get_array)
 
     @classmethod
     def __get_pydantic_json_schema__(
         cls, _core_schema: pcs.CoreSchema, handler: pydantic.GetJsonSchemaHandler
     ) -> pydantic.json_schema.JsonSchemaValue:
         result = handler(ImageReference.__pydantic_core_schema__)
-        result["shoefits"] = {"schema_type": "image"}
+        result["shoefits"] = {"export_type": "image"}
         return result
+
+    def _get_array(self) -> np.ndarray:
+        return self._array
 
 
 class ArrayReference(YamlModel, yaml_tag="!core/ndarray-1.1.0"):
@@ -96,6 +103,8 @@ class ImageReference(YamlModel, yaml_tag="!shoefits/image"):
     data: QuantityArrayReference | ArrayReference
     start: Point
 
+    _serialize_extra: Callable[[], np.ndarray]
+
 
 def image_field(
     dtype: npt.DTypeLike,
@@ -105,10 +114,20 @@ def image_field(
     return pydantic.Field(
         json_schema_extra={
             "shoefits": {
-                "schema_type": "image",
-                "dtype": dtype_to_number_str(dtype),
+                "export_type": "image",
+                "dtype": dtype_to_str(dtype, NumberType),
                 "unit": unit,
             },
         },
         **kwargs,
     )
+
+
+class ImageSchema(FitsExportSchemaBase):
+    export_type: Literal["image"] = "image"
+    dtype: NumberType
+    unit: Unit | None = None
+
+    @property
+    def is_data_export(self) -> bool:
+        return True

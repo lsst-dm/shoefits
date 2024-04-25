@@ -38,13 +38,15 @@ class YamlModel(pydantic.BaseModel):
     model_config = pydantic.ConfigDict(arbitrary_types_allowed=True)
     yaml_tag: ClassVar[str]
 
+    _serialize_extra: Any | None = None
+
     @pydantic.model_serializer(mode="wrap")
     def _serialize(
         self, handler: pydantic.SerializerFunctionWrapHandler, info: pydantic.SerializationInfo
     ) -> DeferredYaml | dict[str, Any]:
         result = handler(self)
         if info.context is not None and info.context.get("yaml"):
-            return DeferredYaml(self._represent_yaml, result, self)
+            return DeferredYaml(self._represent_yaml, result, self._serialize_extra)
         return result
 
     @classmethod
