@@ -65,6 +65,7 @@ class NumberKeySchema(SchemaBase):
     schema_type: Literal["number_key"] = "number_key"
     dtype: NumberType
     unit: Unit | None
+    fits_key: str | None = None
 
     @property
     def is_metadata(self) -> bool:
@@ -75,6 +76,7 @@ class StringKeySchema(SchemaBase):
     schema_type: Literal["string_key"] = "string_key"
     size: int | None = None
     is_ascii: bool = False
+    fits_key: str | None = None
 
     @property
     def is_metadata(self) -> bool:

@@ -5,7 +5,6 @@ __all__ = ("Schema",)
 
 import dataclasses
 import enum
-from collections import deque
 from collections.abc import Callable, Iterator
 from typing import TypeAlias, Union, Annotated, ClassVar, cast
 
@@ -69,6 +68,21 @@ class SchemaPath:
 
     def __iter__(self) -> Iterator[SchemaPathTerm]:
         return iter(self._terms)
+
+    def __len__(self) -> int:
+        return len(self)
+
+    @property
+    def head(self) -> SchemaPathTerm:
+        return self._terms[0]
+
+    @property
+    def tail(self) -> SchemaPathTerm:
+        return self._terms[-1]
+
+    def split_from_back(self, n: int = 0) -> Iterator[tuple[SchemaPath, SchemaPath]]:
+        for i in reversed(range(len(self) - n)):
+            yield SchemaPath(*self._terms[:i]), SchemaPath(*self._terms[i:])
 
     @property
     def is_union(self) -> bool:
@@ -155,10 +169,9 @@ class FitsExtensionSchema:
 class Schema:
     def __init__(self, tree: JsonDict):
         self.tree: JsonDict
-        self.exports: dict[SchemaPath, dict[SchemaPath, FitsExportSchema]] = {}
         self.fits: dict[SchemaPath, FitsExtensionSchema] = {}
         self._walk_tree(SchemaPath(), tree)
-        self._resolve_fits_extensions()
+        self._resolve_orphaned_metadata()
 
     def _walk_tree(self, path: SchemaPath, tree: JsonDict) -> None:
         if (pointer := tree.get("ref")) is not None:
@@ -228,24 +241,41 @@ class Schema:
         pass
 
     def _extract_export(self, tree: JsonDict, path: SchemaPath) -> bool:
+        if not path:
+            raise UnsupportedStructureError(
+                "Root object cannot be a FITS export; an outer struct is required."
+            )
         export = self._export_type_adapter.validate_python(tree)
-        root_path, branch_term = path.pop()
-        branch_path_terms: deque[SchemaPathTerm] = deque()
-        while SchemaPath.is_term_dynamic(branch_term):
-            root_path, branch_term = root_path.pop()
-            branch_path_terms.appendleft(branch_term)
-        self.exports[root_path][SchemaPath(*branch_path_terms)] = export
+        for root_path, branch_path in path.split_from_back(1):
+            if not root_path or not SchemaPath.is_term_dynamic(root_path.tail):
+                break
+        if (fits_ext := self.fits.get(root_path)) is not None:
+            fits_ext = self.fits[root_path]
+        else:
+            fits_ext = FitsExtensionSchema()
+            self.fits[root_path] = fits_ext
+        if export.is_metadata:
+            fits_ext.metadata[branch_path] = cast(MetadataKeySchema, export)
+        else:
+            fits_ext.data[branch_path] = cast(FitsDataExportSchema, export)
         return export.is_nested
 
-    def _resolve_fits_extensions(self) -> None:
-        for root_path, nested in self.exports.items():
-            metadata = {}
-            data_exports = {}
-            for branch_path, export in nested.items():
-                if export.is_metadata:
-                    metadata[branch_path] = export
-                    continue
-                data_exports[branch_path] = export
+    def _resolve_orphaned_metadata(self) -> None:
+        orphans = {root_path: fits_ext for root_path, fits_ext in self.fits.items() if not fits_ext.data}
+        for root_path in orphans:
+            del self.fits[root_path]
+        for root_path, old_fits_ext in orphans.items():
+            for root_path, branch_prefix in root_path.split_from_back(1):
+                if (new_fits_ext := self.fits.get(root_path)) is not None:
+                    for old_branch_path, metadata_key_schema in old_fits_ext.metadata.items():
+                        new_branch_path = branch_prefix.join(old_branch_path)
+                        new_fits_ext.metadata[new_branch_path] = metadata_key_schema
+                    break
+            else:
+                raise UnsupportedStructureError(
+                    f"Metadata keys starting at {branch_prefix} could not be associated "
+                    "with FITS-exported data."
+                )
 
     _walkers: ClassVar[dict[str, Callable[..., None]]] = {
         "object": _walk_tree_object,
