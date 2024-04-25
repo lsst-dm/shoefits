@@ -43,7 +43,7 @@ class LegacySkyMap(SkyMapBase):
 
 
 class CellSkyMap(SkyMapBase):
-    builder: Literal["legacy"]
+    builder: Literal["cell"]
     cell_inner_dimensions: Extent
     cell_border: int
     n_cells_per_patch_inner: int
