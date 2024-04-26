@@ -11,7 +11,7 @@ import pydantic
 from jsonpointer import resolve_pointer
 from pydantic.json_schema import JsonDict, JsonValue
 
-from ._schema_base import SchemaPath, UnionPath, PathPlaceholder, UnsupportedStructureError
+from ._schema_base import SchemaPath, PathPlaceholder, UnsupportedStructureError
 from ._value_field import ValueSchema
 from ._images import ImageSchema
 
@@ -51,14 +51,13 @@ class Schema:
         if (export_tree := tree.get("shoefits")) is not None:
             if not self._extract_export(cast(dict, export_tree), path):
                 return
-        schema_type = tree["type"]
-        if isinstance(schema_type, list):
-            for n, union_type in enumerate(schema_type):
-                tree_copy = tree.copy()
-                tree_copy["type"] = union_type
-                self._walk_tree(path.push(UnionPath(n)), tree_copy)
-        else:
-            self._walkers[cast(str, schema_type)](self, path, **tree)
+        try:
+            schema_type = tree["type"]
+        except KeyError:
+            raise UnsupportedStructureError(f"Unsupported JSON Schema structure: {tree}.")
+        if (walker := self._walkers.get(cast(str, schema_type))) is None:
+            raise UnsupportedStructureError(f"Unsupported JSON Schema type: {schema_type!r}.")
+        walker(self, path, **tree)
 
     def _walk_tree_object(
         self,
@@ -111,7 +110,7 @@ class Schema:
                 "Root object cannot be a FITS export; an outer struct is required."
             )
         export = self._export_type_adapter.validate_python(tree)
-        for root_path, branch_path in path.split_from_back(1):
+        for root_path, branch_path in path.split_from_tail(1):
             if not root_path or not SchemaPath.is_term_dynamic(root_path.tail):
                 break
         if (fits_ext := self.fits.get(root_path)) is not None:
@@ -130,7 +129,7 @@ class Schema:
         for root_path in orphans:
             del self.fits[root_path]
         for root_path, old_fits_ext in orphans.items():
-            for root_path, branch_prefix in root_path.split_from_back(1):
+            for root_path, branch_prefix in root_path.split_from_tail(1):
                 if (new_fits_ext := self.fits.get(root_path)) is not None:
                     for old_branch_path, metadata_key_schema in old_fits_ext.metadata.items():
                         new_branch_path = branch_prefix.join(old_branch_path)

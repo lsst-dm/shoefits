@@ -4,7 +4,6 @@ __all__ = (
     "FitsExportSchemaBase",
     "UnsupportedStructureError",
     "SchemaPathTerm",
-    "UnionPath",
     "PathPlaceholder",
     "SchemaPath",
     "FitsExtensionLabelSchema",
@@ -14,9 +13,11 @@ __all__ = (
 import dataclasses
 import enum
 from collections.abc import Iterator
-from typing import TypeAlias
+from typing import TypeAlias, Any
 
 import pydantic
+
+from ._yaml import DeferredYaml
 
 
 class FitsExportSchemaBase(pydantic.BaseModel):
@@ -47,15 +48,7 @@ class PathPlaceholder(enum.Enum):
         return self.value
 
 
-@dataclasses.dataclass(frozen=True)
-class UnionPath:
-    n: int
-
-    def __str__(self) -> str:
-        return f"?{self.n}"
-
-
-SchemaPathTerm: TypeAlias = PathPlaceholder | UnionPath | str | int
+SchemaPathTerm: TypeAlias = PathPlaceholder | str | int
 
 
 class SchemaPath:
@@ -94,13 +87,13 @@ class SchemaPath:
     def tail(self) -> SchemaPathTerm:
         return self._terms[-1]
 
-    def split_from_back(self, n: int = 0) -> Iterator[tuple[SchemaPath, SchemaPath]]:
-        for i in reversed(range(len(self) - n)):
+    def split_from_head(self, n: int = 0) -> Iterator[tuple[SchemaPath, SchemaPath]]:
+        for i in range(n, len(self._terms)):
             yield SchemaPath(*self._terms[:i]), SchemaPath(*self._terms[i:])
 
-    @property
-    def is_union(self) -> bool:
-        return any(type(term) is UnionPath for term in self._terms)
+    def split_from_tail(self, n: int = 0) -> Iterator[tuple[SchemaPath, SchemaPath]]:
+        for i in reversed(range(len(self._terms) - n)):
+            yield SchemaPath(*self._terms[:i]), SchemaPath(*self._terms[i:])
 
     @property
     def is_multiple(self) -> bool:
@@ -110,7 +103,41 @@ class SchemaPath:
 
     @staticmethod
     def is_term_dynamic(term: SchemaPathTerm) -> bool:
-        return term is PathPlaceholder.MAPPING or term is PathPlaceholder.SEQUENCE or type(term) is UnionPath
+        return term is PathPlaceholder.MAPPING or term is PathPlaceholder.SEQUENCE
+
+    def resolve(self, tree: Any) -> Iterator[tuple[dict[SchemaPath, str | int], Any]]:
+        return self._resolve(0, tree, {})
+
+    def _resolve(
+        self,
+        depth: int,
+        tree: Any,
+        replacements: dict[SchemaPath, str | int],
+    ) -> Iterator[tuple[dict[SchemaPath, str | int], Any]]:
+        while depth < len(self._terms):
+            if isinstance(tree, DeferredYaml):
+                nested = tree.data
+            else:
+                nested = tree
+            match self._terms[depth]:
+                case str() as key:
+                    tree = nested[key]
+                case int() as index:
+                    tree = nested[index]
+                case PathPlaceholder.MAPPING:
+                    for k, v in nested.items():
+                        yield from self._resolve(
+                            depth + 1, v, replacements | {SchemaPath(*self._terms[: depth + 1]): k}
+                        )
+                case PathPlaceholder.SEQUENCE:
+                    for i, v in enumerate(nested):
+                        yield from self._resolve(
+                            depth + 1, v, replacements | {SchemaPath(*self._terms[: depth + 1]): i}
+                        )
+                case _:
+                    raise AssertionError()
+            depth += 1
+        yield tree
 
 
 @dataclasses.dataclass
@@ -139,11 +166,6 @@ class FitsExtensionLabelSchema:
                     if placeholder_path != result.extver:
                         extname_terms.append(f"{{{len(result.placeholders)}}}")
                         result.placeholders.append(placeholder_path)
-                case UnionPath():
-                    # Unions shouldn't have terms in user-visible paths, even
-                    # though we have to track them internally.  We just
-                    # remember that this makes the HDU optional.
-                    result.optional = True
                 case _:
                     raise AssertionError(term)
             cumulative.append(term)
