@@ -110,5 +110,5 @@ warn_unreachable = true
 warn_unused_ignores = false
 
 [[tool.mypy.overrides]]
-module = ["astropy", "jsonpointer"]
+module = ["astropy.*", "jsonpointer"]
 ignore_missing_imports = true
