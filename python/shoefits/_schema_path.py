@@ -1,43 +1,18 @@
 from __future__ import annotations
 
 __all__ = (
-    "FitsExportSchemaBase",
-    "UnsupportedStructureError",
     "SchemaPathTerm",
     "PathPlaceholder",
     "SchemaPath",
-    "FitsExtensionLabelSchema",
 )
 
 
-import dataclasses
 import enum
 from collections.abc import Iterator
 from typing import TypeAlias, Any
 
-import pydantic
 
 from ._yaml import DeferredYaml
-
-
-class FitsExportSchemaBase(pydantic.BaseModel):
-    export_type: str
-
-    @property
-    def is_nested(self) -> bool:
-        return False
-
-    @property
-    def is_header_export(self) -> bool:
-        return False
-
-    @property
-    def is_data_export(self) -> bool:
-        return False
-
-
-class UnsupportedStructureError(NotImplementedError):
-    pass
 
 
 class PathPlaceholder(enum.Enum):
@@ -138,59 +113,3 @@ class SchemaPath:
                     raise AssertionError()
             depth += 1
         yield tree
-
-
-@dataclasses.dataclass
-class FitsExtensionLabelSchema:
-    @classmethod
-    def from_schema_path(cls, path: SchemaPath) -> FitsExtensionLabelSchema:
-        result = cls(extname="")
-        cumulative: list[SchemaPathTerm] = []
-        # First pass: just look for sequences; we'll use the last one's index
-        # for EXTVER.
-        for term in path:
-            if term is PathPlaceholder.SEQUENCE:
-                result.extver = SchemaPath(*cumulative)
-            cumulative.append(term)
-        # Second pass: process all terms to build extname and placeholders.
-        cumulative.clear()
-        extname_terms: list[str] = []
-        for term in path:
-            match term:
-                case str():
-                    extname_terms.append(term)
-                case int():
-                    extname_terms.append(str(term))
-                case PathPlaceholder():
-                    placeholder_path = SchemaPath(*cumulative)
-                    if placeholder_path != result.extver:
-                        extname_terms.append(f"{{{len(result.placeholders)}}}")
-                        result.placeholders.append(placeholder_path)
-                case _:
-                    raise AssertionError(term)
-            cumulative.append(term)
-        result.extname = "/".join(extname_terms)
-        return result
-
-    extname: str
-    """A string placeholder used to form the EXTNAME header value.
-
-    This will include positional `str.format` placeholders for each entry in
-    `placeholders`, to be filled by the actual mapping key or sequence index
-    when writing a file.
-    """
-
-    placeholders: list[SchemaPath] = dataclasses.field(default_factory=list)
-    """Paths to dynamic mappings and sequences whose names or indices need
-    to substituted into `extname`.
-    """
-
-    extver: SchemaPath | None = None
-    """Path to a single dynamic mapping whose index should be used for the
-    EXTVER header.
-    """
-
-    optional: bool = False
-    """If `True`, this FITS extension may not exist in all files with this
-    schema.
-    """

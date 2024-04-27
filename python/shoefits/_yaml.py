@@ -33,6 +33,7 @@ class YamlModel(pydantic.BaseModel):
         if yaml_tag is not None:
             cls.yaml_tag = yaml_tag
             RestrictedYamlLoader.add_constructor(yaml_tag, cls._construct_yaml)
+            # TODO: add 'tag' to JSON schema, nondestructively
         return super().__init_subclass__(**kwargs)
 
     model_config = pydantic.ConfigDict(arbitrary_types_allowed=True)
@@ -41,13 +42,20 @@ class YamlModel(pydantic.BaseModel):
     _serialize_extra: Any | None = None
 
     @pydantic.model_serializer(mode="wrap")
-    def _serialize(
+    def _yaml_model_serialize(
         self, handler: pydantic.SerializerFunctionWrapHandler, info: pydantic.SerializationInfo
     ) -> DeferredYaml | dict[str, Any]:
-        result = handler(self)
+        result = self._serialize(handler, info)
         if info.context is not None and info.context.get("yaml"):
             return DeferredYaml(self._represent_yaml, result, self._serialize_extra)
         return result
+
+    def _serialize(
+        self, handler: pydantic.SerializerFunctionWrapHandler, info: pydantic.SerializationInfo
+    ) -> dict[str, Any]:
+        # This is intended for subclasses to override, since they can't further
+        # customize the serializer via Pydantic methods.
+        return handler(self)
 
     @classmethod
     def _construct_yaml(

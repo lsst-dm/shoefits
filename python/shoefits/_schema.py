@@ -5,36 +5,28 @@ __all__ = ("Schema",)
 
 import dataclasses
 from collections.abc import Callable
-from typing import TypeAlias, Union, Annotated, ClassVar, cast
+from typing import ClassVar, cast
 
-import pydantic
 from jsonpointer import resolve_pointer
 from pydantic.json_schema import JsonDict, JsonValue
 
-from ._schema_base import SchemaPath, PathPlaceholder, UnsupportedStructureError
-from ._value_field import ValueSchema
-from ._images import ImageSchema
+from ._field_base import UnsupportedStructureError
+from ._schema_path import SchemaPath, PathPlaceholder
+from ._frame import FrameFieldInfo, _frame_field_helper
 
 
-_FitsDataExportSchema: TypeAlias = Union[ImageSchema]
-FitsDataExportSchema: TypeAlias = Annotated[
-    _FitsDataExportSchema, pydantic.Field(discriminator="schema_type")
-]
-FitsExportSchema: TypeAlias = Annotated[
-    Union[ValueSchema, _FitsDataExportSchema], pydantic.Field(discriminator="schema_type")
-]
-
-
+# TODO: turn this into FrameSchema, change algorithm for assigning children.
 @dataclasses.dataclass
-class FitsExtensionSchema:
-    metadata: dict[SchemaPath, ValueSchema] = dataclasses.field(default_factory=dict)
-    data: dict[SchemaPath, FitsDataExportSchema] = dataclasses.field(default_factory=dict)
+class FrameSchema:
+    metadata: dict[SchemaPath, FrameFieldInfo] = dataclasses.field(default_factory=dict)
+    data: dict[SchemaPath, FrameFieldInfo] = dataclasses.field(default_factory=dict)
+    children: dict[SchemaPath, FrameSchema] = dataclasses.field(default_factory=dict)
 
 
 class Schema:
     def __init__(self, tree: JsonDict):
         self.tree: JsonDict
-        self.fits: dict[SchemaPath, FitsExtensionSchema] = {}
+        self.frames: dict[SchemaPath, FrameSchema] = {}
         self._walk_tree(SchemaPath(), tree)
         self._resolve_orphaned_metadata()
 
@@ -109,7 +101,7 @@ class Schema:
             raise UnsupportedStructureError(
                 "Root object cannot be a FITS export; an outer struct is required."
             )
-        export = self._export_type_adapter.validate_python(tree)
+        export = _frame_field_helper.type_adapter.validate_python(tree)
         for root_path, branch_path in path.split_from_tail(1):
             if not root_path or not SchemaPath.is_term_dynamic(root_path.tail):
                 break
@@ -119,9 +111,9 @@ class Schema:
             fits_ext = FitsExtensionSchema()
             self.fits[root_path] = fits_ext
         if export.is_header_export:
-            fits_ext.metadata[branch_path] = cast(ValueSchema, export)
+            fits_ext.metadata[branch_path] = export
         if export.is_data_export:
-            fits_ext.data[branch_path] = cast(FitsDataExportSchema, export)
+            fits_ext.data[branch_path] = export
         return export.is_nested
 
     def _resolve_orphaned_metadata(self) -> None:
@@ -150,7 +142,3 @@ class Schema:
         "boolean": _walk_tree_scalar,
         "null": _walk_tree_scalar,
     }
-
-    _export_type_adapter: ClassVar[pydantic.TypeAdapter[FitsExportSchema]] = pydantic.TypeAdapter(
-        FitsExportSchema
-    )

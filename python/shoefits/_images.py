@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-__all__ = ("Image", "image_field")
+__all__ = ("Image", "ImageFieldInfo")
 
 from collections.abc import Callable
 from typing import Any, Literal
@@ -14,7 +14,7 @@ import numpy.typing as npt
 from ._dtypes import Unit, dtype_to_str, NumberType
 from ._geom import Box, Point
 from ._yaml import YamlModel
-from ._schema_base import FitsExportSchemaBase
+from ._field_base import FrameFieldInfoBase
 
 
 class Image:
@@ -80,7 +80,7 @@ class Image:
         cls, _core_schema: pcs.CoreSchema, handler: pydantic.GetJsonSchemaHandler
     ) -> pydantic.json_schema.JsonSchemaValue:
         result = handler(ImageReference.__pydantic_core_schema__)
-        result["shoefits"] = {"export_type": "image"}
+        result["shoefits"] = {"field_type": "image"}
         return result
 
     def _get_array(self) -> np.ndarray:
@@ -106,25 +106,8 @@ class ImageReference(YamlModel, yaml_tag="!shoefits/image"):
     _serialize_extra: Callable[[], np.ndarray]
 
 
-def image_field(
-    dtype: npt.DTypeLike,
-    unit: Unit | None = None,
-    **kwargs: Any,
-) -> pydantic.fields.FieldInfo:
-    return pydantic.Field(
-        json_schema_extra={
-            "shoefits": {
-                "export_type": "image",
-                "dtype": dtype_to_str(dtype, NumberType),
-                "unit": unit,
-            },
-        },
-        **kwargs,
-    )
-
-
-class ImageSchema(FitsExportSchemaBase):
-    export_type: Literal["image"] = "image"
+class ImageFieldInfo(FrameFieldInfoBase):
+    field_type: Literal["image"] = "image"
     dtype: NumberType
     unit: Unit | None = None
 
