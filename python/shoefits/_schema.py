@@ -5,34 +5,47 @@ __all__ = ("Schema",)
 
 import dataclasses
 from collections.abc import Callable
-from typing import ClassVar, cast
+from typing import ClassVar, cast, TypeAlias, Annotated, Union, Literal, Any
 
+import pydantic
 from jsonpointer import resolve_pointer
 from pydantic.json_schema import JsonDict, JsonValue
 
-from ._field_base import UnsupportedStructureError
+from ._field_base import UnsupportedStructureError, ValueFieldInfo, FieldInfoBase
 from ._schema_path import SchemaPath, PathPlaceholder
-from ._frame import FrameFieldInfo, _frame_field_helper
-
-
-# TODO: turn this into FrameSchema, change algorithm for assigning children.
-@dataclasses.dataclass
-class FrameSchema:
-    metadata: dict[SchemaPath, FrameFieldInfo] = dataclasses.field(default_factory=dict)
-    data: dict[SchemaPath, FrameFieldInfo] = dataclasses.field(default_factory=dict)
-    children: dict[SchemaPath, FrameSchema] = dataclasses.field(default_factory=dict)
+from ._field import FieldInfo, _FieldSchemaCallback
 
 
 class Schema:
-    def __init__(self, tree: JsonDict):
-        self.tree: JsonDict
-        self.frames: dict[SchemaPath, FrameSchema] = {}
-        self._walk_tree(SchemaPath(), tree)
-        self._resolve_orphaned_metadata()
+    def __init__(
+        self,
+        json: JsonDict,
+        metadata: dict[str, FieldInfo],
+        data: dict[str, FieldInfo],
+        children: dict[SchemaPath, Schema],
+    ):
+        self.json = json
+        self.metadata = metadata
+        self.data = data
+        self.children = children
 
-    def _walk_tree(self, path: SchemaPath, tree: JsonDict) -> None:
+    @classmethod
+    def build(cls, frame_type: type[pydantic.BaseModel]) -> Schema:
+        json_schema = frame_type.model_json_schema()
+        result = cls(json_schema, {}, {}, {})
+        for name, field_info in frame_type.model_fields.items():
+            match field_info.json_schema_extra:
+                case _FieldSchemaCallback(info=info):
+                    if info.is_header_export:
+                        result.metadata[name] = info
+                    if info.is_data_export:
+                        result.data[name] = info
+        result._walk_json_schema(SchemaPath(), json_schema)
+        return result
+
+    def _walk_json_schema(self, path: SchemaPath, tree: JsonDict) -> None:
         if (pointer := tree.get("ref")) is not None:
-            self.tree.update(resolve_pointer(cast(str, pointer).lstrip("#")))
+            tree.update(resolve_pointer(self.json, cast(str, pointer).lstrip("#")))
             del tree["$ref"]
         if "$defs" in tree:
             # This branch holds the targets of JSON pointers, which we need to

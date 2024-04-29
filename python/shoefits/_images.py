@@ -14,7 +14,7 @@ import numpy.typing as npt
 from ._dtypes import Unit, dtype_to_str, NumberType
 from ._geom import Box, Point
 from ._yaml import YamlModel
-from ._field_base import FrameFieldInfoBase
+from ._field_base import FieldInfoBase
 
 
 class Image:
@@ -106,7 +106,7 @@ class ImageReference(YamlModel, yaml_tag="!shoefits/image"):
     _serialize_extra: Callable[[], np.ndarray]
 
 
-class ImageFieldInfo(FrameFieldInfoBase):
+class ImageFieldInfo(FieldInfoBase):
     field_type: Literal["image"] = "image"
     dtype: NumberType
     unit: Unit | None = None

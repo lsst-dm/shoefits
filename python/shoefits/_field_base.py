@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-__all__ = ("FrameFieldInfoBase", "UnsupportedStructureError", "ValueFieldInfo")
+__all__ = ("FieldInfoBase", "UnsupportedStructureError", "ValueFieldInfo")
 
 from typing import Literal
 import pydantic
@@ -11,12 +11,8 @@ class UnsupportedStructureError(NotImplementedError):
     pass
 
 
-class FrameFieldInfoBase(pydantic.BaseModel):
+class FieldInfoBase(pydantic.BaseModel):
     field_type: str
-
-    @property
-    def is_nested(self) -> bool:
-        return False
 
     @property
     def is_header_export(self) -> bool:
@@ -26,8 +22,12 @@ class FrameFieldInfoBase(pydantic.BaseModel):
     def is_data_export(self) -> bool:
         return False
 
+    @property
+    def is_frame(self) -> bool:
+        return False
 
-class ValueFieldInfo(FrameFieldInfoBase):
+
+class ValueFieldInfo(FieldInfoBase):
     field_type: Literal["value"] = "value"
     dtype: ValueType
     unit: Unit | None = None
