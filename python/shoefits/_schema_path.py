@@ -2,33 +2,32 @@ from __future__ import annotations
 
 __all__ = (
     "SchemaPathTerm",
-    "PathPlaceholder",
     "SchemaPath",
 )
 
 
-import enum
 from collections.abc import Iterator
-from typing import TypeAlias, Any
+from typing import TypeAlias, Any, ClassVar, Literal
 
 
 from ._yaml import DeferredYaml
 
 
-class PathPlaceholder(enum.Enum):
-    MAPPING = ":"
-    SEQUENCE = "*"
-
-    def __str__(self) -> str:
-        return self.value
+class Placeholders:
+    MAPPING: ClassVar[Literal[":"]] = ":"
+    SEQUENCE: ClassVar[Literal["*"]] = "*"
 
 
-SchemaPathTerm: TypeAlias = PathPlaceholder | str | int
+SchemaPathTerm: TypeAlias = str
 
 
 class SchemaPath:
     def __init__(self, *args: SchemaPathTerm):
         self._terms = args
+
+    @classmethod
+    def from_str(cls, path: str) -> SchemaPath:
+        return cls(*path.split("/"))
 
     def push(self, *terms: SchemaPathTerm) -> SchemaPath:
         return SchemaPath(*self._terms, *terms)
@@ -40,7 +39,7 @@ class SchemaPath:
         return SchemaPath(*self._terms, *other._terms)
 
     def __str__(self) -> str:
-        return "/".join(map(str, self._terms))
+        return "/".join(self._terms)
 
     def __hash__(self) -> int:
         return hash(self._terms)
@@ -72,13 +71,11 @@ class SchemaPath:
 
     @property
     def is_multiple(self) -> bool:
-        return any(
-            term is PathPlaceholder.MAPPING or term is PathPlaceholder.SEQUENCE for term in self._terms
-        )
+        return any(term == Placeholders.MAPPING or term == Placeholders.SEQUENCE for term in self._terms)
 
     @staticmethod
     def is_term_dynamic(term: SchemaPathTerm) -> bool:
-        return term is PathPlaceholder.MAPPING or term is PathPlaceholder.SEQUENCE
+        return term == Placeholders.MAPPING or term == Placeholders.SEQUENCE
 
     def resolve(self, tree: Any) -> Iterator[tuple[dict[SchemaPath, str | int], Any]]:
         return self._resolve(0, tree, {})
@@ -95,20 +92,21 @@ class SchemaPath:
             else:
                 nested = tree
             match self._terms[depth]:
-                case str() as key:
-                    tree = nested[key]
-                case int() as index:
-                    tree = nested[index]
-                case PathPlaceholder.MAPPING:
+                case Placeholders.MAPPING:
                     for k, v in nested.items():
                         yield from self._resolve(
                             depth + 1, v, replacements | {SchemaPath(*self._terms[: depth + 1]): k}
                         )
-                case PathPlaceholder.SEQUENCE:
+                case Placeholders.SEQUENCE:
                     for i, v in enumerate(nested):
                         yield from self._resolve(
                             depth + 1, v, replacements | {SchemaPath(*self._terms[: depth + 1]): i}
                         )
+                case str() as key:
+                    if key.isdigit():
+                        tree = nested[int(key)]
+                    else:
+                        tree = nested[key]
                 case _:
                     raise AssertionError()
             depth += 1

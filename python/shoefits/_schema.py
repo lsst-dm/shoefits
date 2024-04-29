@@ -11,41 +11,46 @@ import pydantic
 from jsonpointer import resolve_pointer
 from pydantic.json_schema import JsonDict, JsonValue
 
-from ._field_base import UnsupportedStructureError, ValueFieldInfo, FieldInfoBase
-from ._schema_path import SchemaPath, PathPlaceholder
-from ._field import FieldInfo, _FieldSchemaCallback
+from ._field_base import UnsupportedStructureError
+from ._schema_path import SchemaPath, Placeholders
+from ._field import FieldInfo, _FieldSchemaCallback, _field_helper
 
 
 class Schema:
     def __init__(
         self,
         json: JsonDict,
-        metadata: dict[str, FieldInfo],
-        data: dict[str, FieldInfo],
+        header_exports: dict[str, FieldInfo],
+        data_exports: dict[str, FieldInfo],
         children: dict[SchemaPath, Schema],
     ):
         self.json = json
-        self.metadata = metadata
-        self.data = data
+        self.header_exports = header_exports
+        self.data_exports = data_exports
         self.children = children
 
     @classmethod
     def build(cls, frame_type: type[pydantic.BaseModel]) -> Schema:
-        json_schema = frame_type.model_json_schema()
+        json_schema = frame_type.model_json_schema(mode="serialization")
         result = cls(json_schema, {}, {}, {})
         for name, field_info in frame_type.model_fields.items():
             match field_info.json_schema_extra:
                 case _FieldSchemaCallback(info=info):
-                    if info.is_header_export:
-                        result.metadata[name] = info
-                    if info.is_data_export:
-                        result.data[name] = info
+                    if _field_helper.is_header_export(info):
+                        result.header_exports[name] = info
+                    if _field_helper.is_data_export(info):
+                        result.data_exports[name] = info
         result._walk_json_schema(SchemaPath(), json_schema)
         return result
 
     def _walk_json_schema(self, path: SchemaPath, tree: JsonDict) -> None:
         if (pointer := tree.get("ref")) is not None:
-            tree.update(resolve_pointer(self.json, cast(str, pointer).lstrip("#")))
+            deref = cast(dict, resolve_pointer(self.json, cast(str, pointer).lstrip("#")))
+            if "shoefits" in deref:
+                # Merge nested 'shoefits' dictionaries, instead of overriding
+                # them completely.
+                cast(dict, tree["shoefits"]).update(deref.pop("shoefits"))
+            tree.update(deref)
             del tree["$ref"]
         if "$defs" in tree:
             # This branch holds the targets of JSON pointers, which we need to
@@ -53,8 +58,9 @@ class Schema:
             # them in the local tree because that '$' won't unpack into kwargs.
             tree = tree.copy()
             del tree["$defs"]
-        if (export_tree := tree.get("shoefits")) is not None:
-            if not self._extract_export(cast(dict, export_tree), path):
+        if (field_info := cast(FieldInfo | None, tree.get("shoefits"))) is not None:
+            if _field_helper.is_frame(field_info):
+                self.children
                 return
         try:
             schema_type = tree["type"]
@@ -64,7 +70,7 @@ class Schema:
             raise UnsupportedStructureError(f"Unsupported JSON Schema type: {schema_type!r}.")
         walker(self, path, **tree)
 
-    def _walk_tree_object(
+    def _walk_json_schema_object(
         self,
         path: SchemaPath,
         properties: dict[str, JsonDict] | None = None,
@@ -78,10 +84,10 @@ class Schema:
         if properties:
             # Struct, with fixed fields.
             for k, v in properties.items():
-                self._walk_tree(path.push(k), v)
+                self._walk_json_schema(path.push(k), v)
         elif additionalProperties is not None:
             # Mapping, with dynamic keys.
-            self._walk_tree(path.push(PathPlaceholder.MAPPING), additionalProperties)
+            self._walk_json_schema(path.push(Placeholders.MAPPING), additionalProperties)
         else:
             # Empty struct.
             pass
@@ -98,10 +104,10 @@ class Schema:
         if prefixItems:
             # Tuple, with fixed elements
             for index, item in enumerate(prefixItems):
-                self._walk_tree(path.push(index), item)
+                self._walk_json_schema(path.push(str(index)), item)
         elif items is not None:
             # List, with dynamic elements.
-            self._walk_tree(path.push(PathPlaceholder.SEQUENCE), items)
+            self._walk_json_schema(path.push(Placeholders.SEQUENCE), items)
         else:
             # Empty struct.
             pass
@@ -109,45 +115,8 @@ class Schema:
     def _walk_tree_scalar(self, **kwargs: JsonValue) -> None:
         pass
 
-    def _extract_export(self, tree: JsonDict, path: SchemaPath) -> bool:
-        if not path:
-            raise UnsupportedStructureError(
-                "Root object cannot be a FITS export; an outer struct is required."
-            )
-        export = _frame_field_helper.type_adapter.validate_python(tree)
-        for root_path, branch_path in path.split_from_tail(1):
-            if not root_path or not SchemaPath.is_term_dynamic(root_path.tail):
-                break
-        if (fits_ext := self.fits.get(root_path)) is not None:
-            fits_ext = self.fits[root_path]
-        else:
-            fits_ext = FitsExtensionSchema()
-            self.fits[root_path] = fits_ext
-        if export.is_header_export:
-            fits_ext.metadata[branch_path] = export
-        if export.is_data_export:
-            fits_ext.data[branch_path] = export
-        return export.is_nested
-
-    def _resolve_orphaned_metadata(self) -> None:
-        orphans = {root_path: fits_ext for root_path, fits_ext in self.fits.items() if not fits_ext.data}
-        for root_path in orphans:
-            del self.fits[root_path]
-        for root_path, old_fits_ext in orphans.items():
-            for root_path, branch_prefix in root_path.split_from_tail(1):
-                if (new_fits_ext := self.fits.get(root_path)) is not None:
-                    for old_branch_path, metadata_key_schema in old_fits_ext.metadata.items():
-                        new_branch_path = branch_prefix.join(old_branch_path)
-                        new_fits_ext.metadata[new_branch_path] = metadata_key_schema
-                    break
-            else:
-                raise UnsupportedStructureError(
-                    f"Metadata keys starting at {branch_prefix} could not be associated "
-                    "with FITS-exported data."
-                )
-
     _walkers: ClassVar[dict[str, Callable[..., None]]] = {
-        "object": _walk_tree_object,
+        "object": _walk_json_schema_object,
         "array": _walk_tree_array,
         "string": _walk_tree_scalar,
         "integer": _walk_tree_scalar,

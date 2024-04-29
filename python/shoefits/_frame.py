@@ -4,16 +4,19 @@ import pydantic.json
 
 __all__ = ("Frame",)
 
-from typing import Any, ClassVar, Self, Literal
+from typing import Any, ClassVar, Self
 
 import pydantic
+import pydantic_core.core_schema as pcs
 
 from ._yaml import YamlModel
+from ._field import FrameFieldInfo
 from ._schema import Schema
-from ._field_base import FieldInfoBase
 
 
 class Frame(YamlModel, yaml_tag="!shoefits/frame-0.0.1"):
+    model_config = pydantic.ConfigDict(json_schema_extra={"shoefits": {"field_type": "field"}})
+
     @classmethod
     def __pydantic_init_subclass__(cls, **kwargs: Any) -> None:
         super().__pydantic_init_subclass__(**kwargs)
@@ -33,12 +36,25 @@ class Frame(YamlModel, yaml_tag="!shoefits/frame-0.0.1"):
     ) -> dict[str, Any]:
         return handler(self)
 
+    @classmethod
+    def __get_pydantic_json_schema__(
+        cls, _core_schema: pcs.CoreSchema, handler: pydantic.GetJsonSchemaHandler
+    ) -> pydantic.json_schema.JsonSchemaValue:
+        result = handler(_core_schema)
+        if hasattr(cls, "frame_schema"):
+            result["shoefits"] = FrameFieldInfo(
+                field_type="frame",
+                header_exports=list(cls.frame_schema.header_exports),
+                data_exports=list(cls.frame_schema.data_exports),
+                children=[str(path) for path in cls.frame_schema.children],
+            )
+        else:
+            result["shoefits"] = FrameFieldInfo(
+                field_type="frame",
+                header_exports=[],
+                data_exports=[],
+                children=[],
+            )
+        return result
+
     frame_schema: ClassVar[Schema]
-
-
-class FrameFieldInfo(FieldInfoBase):
-    field_type: Literal["frame"] = "frame"
-
-    @property
-    def is_frame(self) -> bool:
-        return True

@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-__all__ = ("Image", "ImageFieldInfo")
+__all__ = ("Image", "ImageFieldInfo", "make_image_field_info")
 
 from collections.abc import Callable
-from typing import Any, Literal
+from typing import Any, Literal, TypedDict
 import pydantic
 import pydantic_core.core_schema as pcs
 
@@ -14,7 +14,6 @@ import numpy.typing as npt
 from ._dtypes import Unit, dtype_to_str, NumberType
 from ._geom import Box, Point
 from ._yaml import YamlModel
-from ._field_base import FieldInfoBase
 
 
 class Image:
@@ -106,11 +105,13 @@ class ImageReference(YamlModel, yaml_tag="!shoefits/image"):
     _serialize_extra: Callable[[], np.ndarray]
 
 
-class ImageFieldInfo(FieldInfoBase):
-    field_type: Literal["image"] = "image"
+class ImageFieldInfo(TypedDict):
+    field_type: Literal["image"]
     dtype: NumberType
-    unit: Unit | None = None
+    unit: Unit | None
 
-    @property
-    def is_data_export(self) -> bool:
-        return True
+
+def make_image_field_info(
+    dtype: npt.DTypeLike, unit: Unit | None = None, field_type: Literal["image"] = "image"
+) -> ImageFieldInfo:
+    return ImageFieldInfo(dtype=dtype_to_str(dtype, NumberType), unit=unit, field_type=field_type)

@@ -1,38 +1,30 @@
 from __future__ import annotations
 
-__all__ = ("FieldInfoBase", "UnsupportedStructureError", "ValueFieldInfo")
+__all__ = ("UnsupportedStructureError", "ValueFieldInfo", "make_value_field_info")
 
-from typing import Literal
-import pydantic
-from ._dtypes import Unit, ValueType
+from typing import Literal, TypedDict
+
+import numpy.typing as npt
+from ._dtypes import Unit, ValueType, dtype_to_str
 
 
 class UnsupportedStructureError(NotImplementedError):
     pass
 
 
-class FieldInfoBase(pydantic.BaseModel):
-    field_type: str
-
-    @property
-    def is_header_export(self) -> bool:
-        return False
-
-    @property
-    def is_data_export(self) -> bool:
-        return False
-
-    @property
-    def is_frame(self) -> bool:
-        return False
-
-
-class ValueFieldInfo(FieldInfoBase):
-    field_type: Literal["value"] = "value"
+class ValueFieldInfo(TypedDict):
+    field_type: Literal["value"]
     dtype: ValueType
-    unit: Unit | None = None
-    fits_header: str | bool = False
+    unit: Unit | None
+    fits_header: str | bool
 
-    @property
-    def is_header_export(self) -> bool:
-        return bool(self.fits_header)
+
+def make_value_field_info(
+    dtype: npt.DTypeLike,
+    unit: Unit | None = None,
+    fits_header: str | bool = False,
+    field_type: Literal["value"] = "value",
+) -> ValueFieldInfo:
+    return ValueFieldInfo(
+        dtype=dtype_to_str(dtype, ValueType), unit=unit, fits_header=fits_header, field_type=field_type
+    )
