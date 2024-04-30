@@ -7,8 +7,7 @@ __all__ = (
 
 
 from collections.abc import Iterator
-from typing import TypeAlias, Any, ClassVar, Literal
-
+from typing import Any, ClassVar, Literal, TypeAlias
 
 from ._yaml import DeferredYaml
 
@@ -52,30 +51,6 @@ class SchemaPath:
 
     def __len__(self) -> int:
         return len(self)
-
-    @property
-    def head(self) -> SchemaPathTerm:
-        return self._terms[0]
-
-    @property
-    def tail(self) -> SchemaPathTerm:
-        return self._terms[-1]
-
-    def split_from_head(self, n: int = 0) -> Iterator[tuple[SchemaPath, SchemaPath]]:
-        for i in range(n, len(self._terms)):
-            yield SchemaPath(*self._terms[:i]), SchemaPath(*self._terms[i:])
-
-    def split_from_tail(self, n: int = 0) -> Iterator[tuple[SchemaPath, SchemaPath]]:
-        for i in reversed(range(len(self._terms) - n)):
-            yield SchemaPath(*self._terms[:i]), SchemaPath(*self._terms[i:])
-
-    @property
-    def is_multiple(self) -> bool:
-        return any(term == Placeholders.MAPPING or term == Placeholders.SEQUENCE for term in self._terms)
-
-    @staticmethod
-    def is_term_dynamic(term: SchemaPathTerm) -> bool:
-        return term == Placeholders.MAPPING or term == Placeholders.SEQUENCE
 
     def resolve(self, tree: Any) -> Iterator[tuple[dict[SchemaPath, str | int], Any]]:
         return self._resolve(0, tree, {})

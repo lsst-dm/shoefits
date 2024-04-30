@@ -5,6 +5,7 @@ __all__ = ("UnsupportedStructureError", "ValueFieldInfo", "make_value_field_info
 from typing import Literal, TypedDict
 
 import numpy.typing as npt
+
 from ._dtypes import Unit, ValueType, dtype_to_str
 
 

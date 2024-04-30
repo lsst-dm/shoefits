@@ -6,6 +6,7 @@ __all__ = ("SkyMap", "SkyMapDefinition")
 
 from abc import ABC, abstractmethod
 from typing import Annotated, Literal, TypeAlias, Union
+
 import pydantic
 
 from ._geom import Box, Extent

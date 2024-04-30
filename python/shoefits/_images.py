@@ -4,14 +4,13 @@ __all__ = ("Image", "ImageFieldInfo", "make_image_field_info")
 
 from collections.abc import Callable
 from typing import Any, Literal, TypedDict
-import pydantic
-import pydantic_core.core_schema as pcs
 
 import numpy as np
 import numpy.typing as npt
+import pydantic
+import pydantic_core.core_schema as pcs
 
-
-from ._dtypes import Unit, dtype_to_str, NumberType
+from ._dtypes import NumberType, Unit, dtype_to_str
 from ._geom import Box, Point
 from ._yaml import YamlModel
 

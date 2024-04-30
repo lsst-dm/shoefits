@@ -3,11 +3,10 @@ from __future__ import annotations
 __all__ = ("YamlModel", "RestrictedYamlLoader", "DeferredYaml")
 
 from collections.abc import Callable
-from typing import ClassVar, Any, cast
-
-import yaml
+from typing import Any, ClassVar, cast
 
 import pydantic
+import yaml
 
 
 class RestrictedYamlLoader(yaml.SafeLoader):

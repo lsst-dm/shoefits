@@ -12,7 +12,7 @@ __all__ = (
     "dtype_to_str",
 )
 
-from typing import TypeAlias, Literal, get_args, Any
+from typing import Any, Literal, TypeAlias, get_args
 
 import numpy as np
 import numpy.typing as npt

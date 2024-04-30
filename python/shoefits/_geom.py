@@ -1,9 +1,8 @@
 from __future__ import annotations
 
-
 __all__ = ("Point", "Extent", "Interval", "Box")
 
-from typing import Any, ClassVar, overload, final
+from typing import Any, ClassVar, final, overload
 
 import pydantic
 
@@ -23,10 +22,12 @@ class Point(BaseGeometry):
         return Point(x=self.x + other.x, y=self.y + other.y)
 
     @overload
-    def __sub__(self, other: Point) -> Extent: ...
+    def __sub__(self, other: Point) -> Extent:
+        ...
 
     @overload
-    def __sub__(self, other: Extent) -> Point: ...
+    def __sub__(self, other: Extent) -> Point:
+        ...
 
     def __sub__(self, other: Point | Extent) -> Any:
         cls = Point if type(other) is Extent else Extent

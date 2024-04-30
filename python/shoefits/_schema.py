@@ -1,80 +1,112 @@
 from __future__ import annotations
 
-__all__ = ("Schema",)
+__all__ = ("Schema", "FrameSchema")
 
 
 import dataclasses
 from collections.abc import Callable
-from typing import ClassVar, cast, TypeAlias, Annotated, Union, Literal, Any
+from typing import Any, ClassVar, cast
 
 import pydantic
 from jsonpointer import resolve_pointer
-from pydantic.json_schema import JsonDict, JsonValue
+from pydantic.json_schema import JsonValue
 
+from ._field import FieldInfo, _field_helper
 from ._field_base import UnsupportedStructureError
-from ._schema_path import SchemaPath, Placeholders
-from ._field import FieldInfo, _FieldSchemaCallback, _field_helper
+from ._schema_path import Placeholders, SchemaPath
+from .json_schema import JsonSchema
 
 
+@dataclasses.dataclass
+class FrameSchema:
+    header_exports: dict[SchemaPath, FieldInfo] = dataclasses.field(default_factory=dict)
+    data_exports: dict[SchemaPath, FieldInfo] = dataclasses.field(default_factory=dict)
+    children: dict[SchemaPath, str] = dataclasses.field(default_factory=dict)
+    """Schema paths of nested frames.
+
+    Keys are relative paths, values are keys in the parent
+    `Schema.frame_schemas`.
+    """
+
+
+@dataclasses.dataclass
 class Schema:
-    def __init__(
-        self,
-        json: JsonDict,
-        header_exports: dict[str, FieldInfo],
-        data_exports: dict[str, FieldInfo],
-        children: dict[SchemaPath, Schema],
-    ):
-        self.json = json
-        self.header_exports = header_exports
-        self.data_exports = data_exports
-        self.children = children
+    json: JsonSchema
+    frame_schemas: dict[str, FrameSchema] = dataclasses.field(default_factory=dict)
+    root: FrameSchema = dataclasses.field(default_factory=FrameSchema)
 
     @classmethod
     def build(cls, frame_type: type[pydantic.BaseModel]) -> Schema:
-        json_schema = frame_type.model_json_schema(mode="serialization")
-        result = cls(json_schema, {}, {}, {})
-        for name, field_info in frame_type.model_fields.items():
-            match field_info.json_schema_extra:
-                case _FieldSchemaCallback(info=info):
-                    if _field_helper.is_header_export(info):
-                        result.header_exports[name] = info
-                    if _field_helper.is_data_export(info):
-                        result.data_exports[name] = info
-        result._walk_json_schema(SchemaPath(), json_schema)
+        result = cls(json=cast(JsonSchema, frame_type.model_json_schema()))
+        result._walk_json_schema(SchemaPath(), result.json, result.root, result.json["$defs"])
         return result
 
-    def _walk_json_schema(self, path: SchemaPath, tree: JsonDict) -> None:
-        if (pointer := tree.get("ref")) is not None:
-            deref = cast(dict, resolve_pointer(self.json, cast(str, pointer).lstrip("#")))
-            if "shoefits" in deref:
-                # Merge nested 'shoefits' dictionaries, instead of overriding
-                # them completely.
-                cast(dict, tree["shoefits"]).update(deref.pop("shoefits"))
-            tree.update(deref)
-            del tree["$ref"]
-        if "$defs" in tree:
-            # This branch holds the targets of JSON pointers, which we need to
-            # keep in self.tree so we can dereference them, but we don't want
-            # them in the local tree because that '$' won't unpack into kwargs.
-            tree = tree.copy()
-            del tree["$defs"]
-        if (field_info := cast(FieldInfo | None, tree.get("shoefits"))) is not None:
-            if _field_helper.is_frame(field_info):
-                self.children
+    def _walk_json_schema(
+        self,
+        path: SchemaPath,
+        branch: JsonSchema,
+        frame: FrameSchema,
+        defs: dict[str, JsonSchema],
+    ) -> None:
+        # Extract the special shoefits subschema and remove it from the parent;
+        # we don't need to duplicate the information it holds in the public
+        # JSON schema.
+        raw_info: dict[str, Any] = branch.pop("shoefits", {})
+        # The JSON Schema for a nested Pydantic model is always a JSON Pointer
+        # reference back to the $defs section.  Dereference that pointer and
+        # merge it in with the field-level JSON Schema.
+        nested_struct_name: str | None = None
+        if "$ref" in branch:
+            branch = branch.copy()
+            pointer = branch.pop("$ref")
+            nested_struct_name = pointer.removeprefix("#/$defs")
+            if nested_struct_name in self.frame_schemas:
+                frame.children[path] = nested_struct_name
                 return
+            deref = cast(JsonSchema, resolve_pointer(defs, nested_struct_name))
+            raw_info.update(deref.pop("shoefits", {}))
+            # MyPy is concerned that 'branch' and 'deref' might be different
+            # members of the JsonSchema union; we know better.
+            branch.update(deref)  # type: ignore[typeddict-item]
+        if raw_info:
+            info = _field_helper.type_adapter.validate_python(raw_info)
+            if _field_helper.is_header_export(info):
+                frame.header_exports[path] = info
+            if _field_helper.is_data_export(info):
+                frame.data_exports[path] = info
+            if not _field_helper.is_nested(info):
+                # Exit early, since we know this field can't have anything
+                # interesting below it.
+                return
+            elif nested_struct_name is not None:
+                # This is a nested Frame; recurse into a new FrameSchema
+                # starting from the already-dereferenced JSON Schema branch,
+                # and then exit early so we don't also add its childen directly
+                # to its parent.
+                nested_frame = FrameSchema()
+                self._walk_json_schema(SchemaPath(), branch, nested_frame, defs)
+                self.frame_schemas[nested_struct_name] = nested_frame
+                frame.children[path] = nested_struct_name
+                return
+        # Recurse into the JSON Schema to add associated nested exports with
+        # this frame.
         try:
-            schema_type = tree["type"]
+            schema_type = branch["type"]
         except KeyError:
-            raise UnsupportedStructureError(f"Unsupported JSON Schema structure: {tree}.")
+            raise UnsupportedStructureError(f"Unsupported JSON Schema structure: {branch}.")
+        # TODO: support `anyOf` etc. type unions, at least for None/null.
         if (walker := self._walkers.get(cast(str, schema_type))) is None:
             raise UnsupportedStructureError(f"Unsupported JSON Schema type: {schema_type!r}.")
-        walker(self, path, **tree)
+        walker(self, path, frame, defs, **branch)
 
     def _walk_json_schema_object(
         self,
         path: SchemaPath,
-        properties: dict[str, JsonDict] | None = None,
-        additionalProperties: JsonDict | None = None,
+        frame: FrameSchema,
+        defs: dict[str, JsonSchema],
+        *,
+        properties: dict[str, JsonSchema] | None = None,
+        additionalProperties: JsonSchema | None = None,
         **kwargs: JsonValue,
     ) -> None:
         if properties and additionalProperties is not None:
@@ -84,10 +116,10 @@ class Schema:
         if properties:
             # Struct, with fixed fields.
             for k, v in properties.items():
-                self._walk_json_schema(path.push(k), v)
+                self._walk_json_schema(path.push(k), v, frame, defs)
         elif additionalProperties is not None:
             # Mapping, with dynamic keys.
-            self._walk_json_schema(path.push(Placeholders.MAPPING), additionalProperties)
+            self._walk_json_schema(path.push(Placeholders.MAPPING), additionalProperties, frame, defs)
         else:
             # Empty struct.
             pass
@@ -95,8 +127,11 @@ class Schema:
     def _walk_tree_array(
         self,
         path: SchemaPath,
-        items: JsonDict | None = None,
-        prefixItems: list[JsonDict] | None = None,
+        frame: FrameSchema,
+        defs: dict[str, JsonSchema],
+        *,
+        items: JsonSchema | None = None,
+        prefixItems: list[JsonSchema] | None = None,
         **kwargs: JsonValue,
     ) -> None:
         if items is not None and prefixItems:
@@ -104,15 +139,17 @@ class Schema:
         if prefixItems:
             # Tuple, with fixed elements
             for index, item in enumerate(prefixItems):
-                self._walk_json_schema(path.push(str(index)), item)
+                self._walk_json_schema(path.push(str(index)), item, frame, defs)
         elif items is not None:
             # List, with dynamic elements.
-            self._walk_json_schema(path.push(Placeholders.SEQUENCE), items)
+            self._walk_json_schema(path.push(Placeholders.SEQUENCE), items, frame, defs)
         else:
             # Empty struct.
             pass
 
-    def _walk_tree_scalar(self, **kwargs: JsonValue) -> None:
+    def _walk_tree_scalar(
+        self, path: SchemaPath, frame: FrameSchema, defs: dict[str, JsonSchema], **kwargs: JsonValue
+    ) -> None:
         pass
 
     _walkers: ClassVar[dict[str, Callable[..., None]]] = {

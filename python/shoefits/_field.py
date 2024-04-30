@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-__all__ = ("field", "ListFieldInfo", "DictFieldInfo", "FieldInfo")
+__all__ = ("field", "FieldInfo")
 
 
-from typing import cast, TypeAlias, Annotated, Union, Literal, Any, TypedDict, overload
+from typing import Annotated, Any, Literal, TypeAlias, TypedDict, Union, cast, overload
 
 import numpy.typing as npt
 import pydantic
@@ -14,25 +14,12 @@ from ._field_base import UnsupportedStructureError, ValueFieldInfo, make_value_f
 from ._images import ImageFieldInfo
 
 
-class ListFieldInfo(TypedDict):
-    field_type: Literal["list"]
-    item_info: FieldInfo
-
-
-class DictFieldInfo(TypedDict):
-    field_type: Literal["dict"]
-    value_info: FieldInfo
-
-
 class FrameFieldInfo(TypedDict):
     field_type: Literal["frame"]
-    header_exports: list[str]
-    data_exports: list[str]
-    children: list[str]
 
 
 FieldInfo: TypeAlias = Annotated[
-    Union[ImageFieldInfo, ValueFieldInfo, ListFieldInfo, DictFieldInfo, FrameFieldInfo],
+    Union[ImageFieldInfo, ValueFieldInfo, FrameFieldInfo],
     pydantic.Field(discriminator="field_type"),
 ]
 
@@ -76,9 +63,8 @@ class _FieldHelper:
             field_schema.update(kwargs)
             return self.type_adapter.validate_python(field_schema)
         match type_schema:
-            # This field does not have a shoefits type.  It's either a scalar
-            # int/str/float we're annotating for export to FITS, or a list or
-            # dict of shoefits types.  Inspect the JSON Schema to see which.
+            # This field does not have a shoefits type.  It's a scalar
+            # int/str/float we're annotating for export to FITS.
             case {"type": "integer"}:
                 kwargs.setdefault("dtype", "int64")
                 return make_value_field_info(**kwargs)
@@ -88,14 +74,6 @@ class _FieldHelper:
             case {"type": "number"}:
                 kwargs.setdefault("dtype", "float64")
                 return make_value_field_info(**kwargs)
-            case {"type": "array", "items": item_type_schema}:
-                # Interpret kwargs as part of list item schema.
-                item_info = self.process_json_schema(cast(JsonDict, item_type_schema), kwargs)
-                return ListFieldInfo(item_info=item_info, field_type="list")
-            case {"type": "object", "additionalProperties": value_type_schema}:
-                # Interpret kwargs as part of dict value schema.
-                value_info = self.process_json_schema(cast(JsonDict, value_type_schema), kwargs)
-                return DictFieldInfo(value_info=value_info, field_type="dict")
             # TODO: support type unions with at least None.
         raise UnsupportedStructureError("Unsupported type for field.")
 
@@ -105,7 +83,7 @@ class _FieldHelper:
     def is_data_export(self, field_info: FieldInfo) -> bool:
         return field_info["field_type"] == "image"
 
-    def is_frame(self, field_info: FieldInfo) -> bool:
+    def is_nested(self, field_info: FieldInfo) -> bool:
         return field_info["field_type"] == "frame"
 
 
@@ -114,14 +92,16 @@ _field_helper = _FieldHelper()
 
 # Overload for ImageFieldInfo (or list/dict thereof).
 @overload
-def field(*, dtype: npt.DTypeLike, unit: Unit | None = None) -> pydantic.fields.FieldInfo: ...
+def field(*, dtype: npt.DTypeLike, unit: Unit | None = None) -> pydantic.fields.FieldInfo:
+    ...
 
 
 # Overload for ValueFieldInfo (or list/dict thereof).
 @overload
 def field(
     *, dtype: npt.DTypeLike | None = None, unit: Unit | None = None, fits_header: bool | str = False
-) -> pydantic.fields.FieldInfo: ...
+) -> pydantic.fields.FieldInfo:
+    ...
 
 
 def field(**kwargs: Any) -> pydantic.fields.FieldInfo:
