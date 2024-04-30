@@ -11,7 +11,9 @@ from pydantic.json_schema import JsonDict
 
 from ._dtypes import Unit
 from ._field_base import UnsupportedStructureError, ValueFieldInfo, make_value_field_info
+from ._fits_schema import FitsHeaderKeySchema
 from ._images import ImageFieldInfo
+from ._schema_path import SchemaPath
 
 
 class FrameFieldInfo(TypedDict):
@@ -86,22 +88,32 @@ class _FieldHelper:
     def is_nested(self, field_info: FieldInfo) -> bool:
         return field_info["field_type"] == "frame"
 
+    def generate_fits_header_schema(
+        self, path: SchemaPath, field_info: FieldInfo
+    ) -> list[FitsHeaderKeySchema]:
+        match field_info:
+            case {"field_type": "value", "fits_header": key}:
+                if key is False:
+                    return []
+                if key is True:
+                    return [FitsHeaderKeySchema.from_path(path, field_info)]
+                return [FitsHeaderKeySchema(path, field_info, cast(str, key), [])]
+        return []
+
 
 _field_helper = _FieldHelper()
 
 
 # Overload for ImageFieldInfo (or list/dict thereof).
 @overload
-def field(*, dtype: npt.DTypeLike, unit: Unit | None = None) -> pydantic.fields.FieldInfo:
-    ...
+def field(*, dtype: npt.DTypeLike, unit: Unit | None = None) -> pydantic.fields.FieldInfo: ...
 
 
 # Overload for ValueFieldInfo (or list/dict thereof).
 @overload
 def field(
     *, dtype: npt.DTypeLike | None = None, unit: Unit | None = None, fits_header: bool | str = False
-) -> pydantic.fields.FieldInfo:
-    ...
+) -> pydantic.fields.FieldInfo: ...
 
 
 def field(**kwargs: Any) -> pydantic.fields.FieldInfo:

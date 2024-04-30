@@ -52,15 +52,15 @@ class SchemaPath:
     def __len__(self) -> int:
         return len(self)
 
-    def resolve(self, tree: Any) -> Iterator[tuple[dict[SchemaPath, str | int], Any]]:
+    def resolve(self, tree: Any) -> Iterator[tuple[Any, dict[SchemaPath, str | int]]]:
         return self._resolve(0, tree, {})
 
     def _resolve(
         self,
         depth: int,
         tree: Any,
-        replacements: dict[SchemaPath, str | int],
-    ) -> Iterator[tuple[dict[SchemaPath, str | int], Any]]:
+        substitutions: dict[SchemaPath, str | int],
+    ) -> Iterator[tuple[Any, dict[SchemaPath, str | int]]]:
         while depth < len(self._terms):
             if isinstance(tree, DeferredYaml):
                 nested = tree.data
@@ -70,12 +70,12 @@ class SchemaPath:
                 case Placeholders.MAPPING:
                     for k, v in nested.items():
                         yield from self._resolve(
-                            depth + 1, v, replacements | {SchemaPath(*self._terms[: depth + 1]): k}
+                            depth + 1, v, substitutions | {SchemaPath(*self._terms[: depth + 1]): k}
                         )
                 case Placeholders.SEQUENCE:
                     for i, v in enumerate(nested):
                         yield from self._resolve(
-                            depth + 1, v, replacements | {SchemaPath(*self._terms[: depth + 1]): i}
+                            depth + 1, v, substitutions | {SchemaPath(*self._terms[: depth + 1]): i}
                         )
                 case str() as key:
                     if key.isdigit():
@@ -85,4 +85,4 @@ class SchemaPath:
                 case _:
                     raise AssertionError()
             depth += 1
-        yield tree
+        yield tree, substitutions

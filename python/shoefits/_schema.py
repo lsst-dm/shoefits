@@ -13,6 +13,7 @@ from pydantic.json_schema import JsonValue
 
 from ._field import FieldInfo, _field_helper
 from ._field_base import UnsupportedStructureError
+from ._fits_schema import FitsExtensionLabelSchema, FitsExtensionSchema, FitsHeaderKeySchema
 from ._schema_path import Placeholders, SchemaPath
 from .json_schema import JsonSchema
 
@@ -21,7 +22,7 @@ from .json_schema import JsonSchema
 class FrameSchema:
     header_exports: dict[SchemaPath, FieldInfo] = dataclasses.field(default_factory=dict)
     data_exports: dict[SchemaPath, FieldInfo] = dataclasses.field(default_factory=dict)
-    children: dict[SchemaPath, str] = dataclasses.field(default_factory=dict)
+    tree: dict[SchemaPath, str] = dataclasses.field(default_factory=dict)
     """Schema paths of nested frames.
 
     Keys are relative paths, values are keys in the parent
@@ -33,21 +34,28 @@ class FrameSchema:
 class Schema:
     json: JsonSchema
     frame_schemas: dict[str, FrameSchema] = dataclasses.field(default_factory=dict)
-    root: FrameSchema = dataclasses.field(default_factory=FrameSchema)
+    tree: dict[SchemaPath, str] = dataclasses.field(default_factory=dict)
 
     @classmethod
     def build(cls, frame_type: type[pydantic.BaseModel]) -> Schema:
         result = cls(json=cast(JsonSchema, frame_type.model_json_schema()))
-        result._walk_json_schema(SchemaPath(), result.json, result.root, result.json["$defs"])
+        result._walk_json_schema(SchemaPath(), result.json, None, result.json["$defs"])
         return result
+
+    def make_fits_schema(self) -> list[FitsExtensionSchema]:
+        return self._make_fits_schema(SchemaPath(), self.tree, [])
 
     def _walk_json_schema(
         self,
         path: SchemaPath,
         branch: JsonSchema,
-        frame: FrameSchema,
+        frame: FrameSchema | None,
         defs: dict[str, JsonSchema],
     ) -> None:
+        if frame is None:
+            tree = self.tree
+        else:
+            tree = frame.tree
         # Extract the special shoefits subschema and remove it from the parent;
         # we don't need to duplicate the information it holds in the public
         # JSON schema.
@@ -61,7 +69,7 @@ class Schema:
             pointer = branch.pop("$ref")
             nested_struct_name = pointer.removeprefix("#/$defs")
             if nested_struct_name in self.frame_schemas:
-                frame.children[path] = nested_struct_name
+                tree[path] = nested_struct_name
                 return
             deref = cast(JsonSchema, resolve_pointer(defs, nested_struct_name))
             raw_info.update(deref.pop("shoefits", {}))
@@ -71,8 +79,16 @@ class Schema:
         if raw_info:
             info = _field_helper.type_adapter.validate_python(raw_info)
             if _field_helper.is_header_export(info):
+                if frame is None:
+                    raise UnsupportedStructureError(
+                        f"Cannot export header information from {path} without an enclosing Frame."
+                    )
                 frame.header_exports[path] = info
             if _field_helper.is_data_export(info):
+                if frame is None:
+                    raise UnsupportedStructureError(
+                        f"Cannot export data from {path} without an enclosing Frame."
+                    )
                 frame.data_exports[path] = info
             if not _field_helper.is_nested(info):
                 # Exit early, since we know this field can't have anything
@@ -86,7 +102,7 @@ class Schema:
                 nested_frame = FrameSchema()
                 self._walk_json_schema(SchemaPath(), branch, nested_frame, defs)
                 self.frame_schemas[nested_struct_name] = nested_frame
-                frame.children[path] = nested_struct_name
+                tree[path] = nested_struct_name
                 return
         # Recurse into the JSON Schema to add associated nested exports with
         # this frame.
@@ -161,3 +177,30 @@ class Schema:
         "boolean": _walk_tree_scalar,
         "null": _walk_tree_scalar,
     }
+
+    def _make_fits_schema(
+        self, path_prefix: SchemaPath, tree: dict[SchemaPath, str], parent_header: list[FitsHeaderKeySchema]
+    ) -> list[FitsExtensionSchema]:
+        result: list[FitsExtensionSchema] = []
+        for frame_path_suffix, frame_schema_name in tree.items():
+            frame_path = path_prefix.join(frame_path_suffix)
+            frame_schema = self.frame_schemas[frame_schema_name]
+            common_header: list[FitsHeaderKeySchema] = parent_header.copy()
+            for header_key_path_suffix, header_key_info in frame_schema.header_exports.items():
+                common_header.extend(
+                    _field_helper.generate_fits_header_schema(header_key_path_suffix, header_key_info)
+                )
+            for data_path_suffix, data_info in frame_schema.data_exports.items():
+                full_path = frame_path.join(data_path_suffix)
+                header = common_header.copy()
+                header.extend(_field_helper.generate_fits_header_schema(data_path_suffix, data_info))
+                extension = FitsExtensionSchema(
+                    label=FitsExtensionLabelSchema.from_path(full_path),
+                    frame_path=frame_path,
+                    data_path=data_path_suffix,
+                    data_info=data_info,
+                    header=header,
+                )
+                result.append(extension)
+            result.extend(self._make_fits_schema(frame_path, frame_schema.tree, common_header))
+        return result
