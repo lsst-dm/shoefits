@@ -13,7 +13,7 @@ from pydantic.json_schema import JsonValue
 
 from ._field import FieldInfo, _field_helper
 from ._field_base import UnsupportedStructureError
-from ._fits_schema import FitsExtensionLabelSchema, FitsExtensionSchema, FitsHeaderKeySchema
+from ._fits_schema import FitsExtensionSchema, FitsHeaderKeySchema, FitsSchemaConfiguration
 from ._schema_path import Placeholders, SchemaPath
 from .json_schema import JsonSchema
 
@@ -42,8 +42,8 @@ class Schema:
         result._walk_json_schema(SchemaPath(), result.json, None, result.json["$defs"])
         return result
 
-    def make_fits_schema(self) -> list[FitsExtensionSchema]:
-        return self._make_fits_schema(SchemaPath(), self.tree, [])
+    def make_fits_schema(self, config: FitsSchemaConfiguration) -> list[FitsExtensionSchema]:
+        return self._make_fits_schema(SchemaPath(), self.tree, [], config)
 
     def _walk_json_schema(
         self,
@@ -179,7 +179,11 @@ class Schema:
     }
 
     def _make_fits_schema(
-        self, path_prefix: SchemaPath, tree: dict[SchemaPath, str], parent_header: list[FitsHeaderKeySchema]
+        self,
+        path_prefix: SchemaPath,
+        tree: dict[SchemaPath, str],
+        parent_header: list[FitsHeaderKeySchema],
+        config: FitsSchemaConfiguration,
     ) -> list[FitsExtensionSchema]:
         result: list[FitsExtensionSchema] = []
         for frame_path_suffix, frame_schema_name in tree.items():
@@ -188,19 +192,23 @@ class Schema:
             common_header: list[FitsHeaderKeySchema] = parent_header.copy()
             for header_key_path_suffix, header_key_info in frame_schema.header_exports.items():
                 common_header.extend(
-                    _field_helper.generate_fits_header_schema(header_key_path_suffix, header_key_info)
+                    _field_helper.generate_fits_header_schema(
+                        header_key_path_suffix,
+                        header_key_info,
+                        config,
+                    )
                 )
             for data_path_suffix, data_info in frame_schema.data_exports.items():
                 full_path = frame_path.join(data_path_suffix)
                 header = common_header.copy()
-                header.extend(_field_helper.generate_fits_header_schema(data_path_suffix, data_info))
+                header.extend(_field_helper.generate_fits_header_schema(data_path_suffix, data_info, config))
                 extension = FitsExtensionSchema(
-                    label=FitsExtensionLabelSchema.from_path(full_path),
+                    label=config.get_extension_label(full_path),
                     frame_path=frame_path,
                     data_path=data_path_suffix,
                     data_info=data_info,
                     header=header,
                 )
                 result.append(extension)
-            result.extend(self._make_fits_schema(frame_path, frame_schema.tree, common_header))
+            result.extend(self._make_fits_schema(frame_path, frame_schema.tree, common_header, config))
         return result

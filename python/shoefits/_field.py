@@ -11,7 +11,7 @@ from pydantic.json_schema import JsonDict
 
 from ._dtypes import Unit
 from ._field_base import UnsupportedStructureError, ValueFieldInfo, make_value_field_info
-from ._fits_schema import FitsHeaderKeySchema
+from ._fits_schema import FitsHeaderKeySchema, FitsSchemaConfiguration
 from ._images import ImageFieldInfo
 from ._schema_path import SchemaPath
 
@@ -89,15 +89,11 @@ class _FieldHelper:
         return field_info["field_type"] == "frame"
 
     def generate_fits_header_schema(
-        self, path: SchemaPath, field_info: FieldInfo
+        self, path: SchemaPath, field_info: FieldInfo, config: FitsSchemaConfiguration
     ) -> list[FitsHeaderKeySchema]:
         match field_info:
-            case {"field_type": "value", "fits_header": key}:
-                if key is False:
-                    return []
-                if key is True:
-                    return [FitsHeaderKeySchema.from_path(path, field_info)]
-                return [FitsHeaderKeySchema(path, field_info, cast(str, key), [])]
+            case {"field_type": "value", "fits_header": key} if key:
+                return [config.get_header_key_schema(path, cast(ValueFieldInfo, field_info))]
         return []
 
 
