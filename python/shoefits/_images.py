@@ -1,6 +1,12 @@
 from __future__ import annotations
 
-__all__ = ("Image", "ImageFieldInfo", "make_image_field_info")
+__all__ = (
+    "Image",
+    "ImageFieldInfo",
+    "make_image_field_info",
+    "MaskFieldInfo",
+    "make_mask_field_info",
+)
 
 from collections.abc import Callable
 from typing import Any, Literal, TypedDict
@@ -10,7 +16,7 @@ import numpy.typing as npt
 import pydantic
 import pydantic_core.core_schema as pcs
 
-from ._dtypes import NumberType, Unit, dtype_to_str
+from ._dtypes import NumberType, Unit, UnsignedIntegerType, dtype_to_str
 from ._geom import Box, Point
 from ._yaml import YamlModel
 
@@ -114,3 +120,15 @@ def make_image_field_info(
     dtype: npt.DTypeLike, unit: Unit | None = None, field_type: Literal["image"] = "image"
 ) -> ImageFieldInfo:
     return ImageFieldInfo(dtype=dtype_to_str(dtype, NumberType), unit=unit, field_type=field_type)
+
+
+class MaskFieldInfo(TypedDict):
+    field_type: Literal["mask"]
+    dtype: UnsignedIntegerType
+    planes: dict[str, str]  # Plane name to documentation; bit is set by enumerate().
+
+
+def make_mask_field_info(
+    dtype: npt.DTypeLike, planes: dict[str, str], field_type: Literal["mask"] = "mask"
+) -> MaskFieldInfo:
+    return MaskFieldInfo(dtype=dtype_to_str(dtype, UnsignedIntegerType), planes=planes, field_type=field_type)

@@ -11,6 +11,7 @@ __all__ = (
     "is_frame_field",
     "is_value_field",
     "is_image_field",
+    "is_mask_field",
 )
 
 
@@ -22,7 +23,7 @@ from pydantic.json_schema import JsonDict
 
 from ._dtypes import Unit
 from ._field_base import UnsupportedStructureError, ValueFieldInfo, make_value_field_info
-from ._images import ImageFieldInfo
+from ._images import ImageFieldInfo, MaskFieldInfo
 
 
 class FrameFieldInfo(TypedDict):
@@ -34,11 +35,13 @@ HeaderExportFieldInfo: TypeAlias = Annotated[
 ]
 
 
-DataExportFieldInfo: TypeAlias = Annotated[Union[ImageFieldInfo], pydantic.Field(discriminator="field_type")]
+DataExportFieldInfo: TypeAlias = Annotated[
+    Union[ImageFieldInfo, MaskFieldInfo], pydantic.Field(discriminator="field_type")
+]
 
 
 FieldInfo: TypeAlias = Annotated[
-    Union[ImageFieldInfo, ValueFieldInfo, FrameFieldInfo],
+    Union[ImageFieldInfo, MaskFieldInfo, ValueFieldInfo, FrameFieldInfo],
     pydantic.Field(discriminator="field_type"),
 ]
 
@@ -117,15 +120,24 @@ def is_image_field(field_info: FieldInfo) -> TypeGuard[ImageFieldInfo]:
     return field_info["field_type"] == "value"
 
 
+def is_mask_field(field_info: FieldInfo) -> TypeGuard[MaskFieldInfo]:
+    return field_info["field_type"] == "value"
+
+
 _field_helper = _FieldHelper()
 
 
-# Overload for ImageFieldInfo (or list/dict thereof).
+# Overload for ImageFieldInfo.
 @overload
 def field(*, dtype: npt.DTypeLike, unit: Unit | None = None) -> pydantic.fields.FieldInfo: ...
 
 
-# Overload for ValueFieldInfo (or list/dict thereof).
+# Overload for MaskFieldInfo.
+@overload
+def field(*, dtype: npt.DTypeLike, planes: dict[str, str]) -> pydantic.fields.FieldInfo: ...
+
+
+# Overload for ValueFieldInfo.
 @overload
 def field(
     *, dtype: npt.DTypeLike | None = None, unit: Unit | None = None, fits_header: bool | str = False
