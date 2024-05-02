@@ -3,9 +3,10 @@ from __future__ import annotations
 __all__ = (
     "SchemaPathTerm",
     "SchemaPath",
+    "SchemaPathName",
 )
 
-
+import dataclasses
 from collections.abc import Iterator
 from typing import Any, ClassVar, Literal, TypeAlias
 
@@ -86,3 +87,13 @@ class SchemaPath:
                     raise AssertionError()
             depth += 1
         yield tree, substitutions
+
+
+@dataclasses.dataclass
+class SchemaPathName:
+    template: str
+    substitutions: tuple[SchemaPath, ...]
+
+    @property
+    def is_concrete(self) -> bool:
+        return not self.substitutions

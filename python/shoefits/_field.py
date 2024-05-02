@@ -1,9 +1,20 @@
 from __future__ import annotations
 
-__all__ = ("field", "FieldInfo")
+__all__ = (
+    "field",
+    "FieldInfo",
+    "FrameFieldInfo",
+    "DataExportFieldInfo",
+    "HeaderExportFieldInfo",
+    "is_header_export",
+    "is_data_export",
+    "is_frame_field",
+    "is_value_field",
+    "is_image_field",
+)
 
 
-from typing import Annotated, Any, Literal, TypeAlias, TypedDict, Union, cast, overload
+from typing import Annotated, Any, Literal, TypeAlias, TypedDict, TypeGuard, Union, cast, overload
 
 import numpy.typing as npt
 import pydantic
@@ -11,13 +22,19 @@ from pydantic.json_schema import JsonDict
 
 from ._dtypes import Unit
 from ._field_base import UnsupportedStructureError, ValueFieldInfo, make_value_field_info
-from ._fits_schema import FitsHeaderKeySchema, FitsSchemaConfiguration
 from ._images import ImageFieldInfo
-from ._schema_path import SchemaPath
 
 
 class FrameFieldInfo(TypedDict):
     field_type: Literal["frame"]
+
+
+HeaderExportFieldInfo: TypeAlias = Annotated[
+    Union[ValueFieldInfo], pydantic.Field(discriminator="field_type")
+]
+
+
+DataExportFieldInfo: TypeAlias = Annotated[Union[ImageFieldInfo], pydantic.Field(discriminator="field_type")]
 
 
 FieldInfo: TypeAlias = Annotated[
@@ -79,22 +96,25 @@ class _FieldHelper:
             # TODO: support type unions with at least None.
         raise UnsupportedStructureError("Unsupported type for field.")
 
-    def is_header_export(self, field_info: FieldInfo) -> bool:
-        return field_info["field_type"] == "value" and bool(field_info["fits_header"])
 
-    def is_data_export(self, field_info: FieldInfo) -> bool:
-        return field_info["field_type"] == "image"
+def is_header_export(field_info: FieldInfo) -> TypeGuard[HeaderExportFieldInfo]:
+    return field_info["field_type"] == "value" and bool(field_info["fits_header"])
 
-    def is_nested(self, field_info: FieldInfo) -> bool:
-        return field_info["field_type"] == "frame"
 
-    def generate_fits_header_schema(
-        self, path: SchemaPath, field_info: FieldInfo, config: FitsSchemaConfiguration
-    ) -> list[FitsHeaderKeySchema]:
-        match field_info:
-            case {"field_type": "value", "fits_header": key} if key:
-                return [config.get_header_key_schema(path, cast(ValueFieldInfo, field_info))]
-        return []
+def is_data_export(field_info: FieldInfo) -> TypeGuard[DataExportFieldInfo]:
+    return field_info["field_type"] == "image"
+
+
+def is_frame_field(field_info: FieldInfo) -> TypeGuard[FrameFieldInfo]:
+    return field_info["field_type"] == "frame"
+
+
+def is_value_field(field_info: FieldInfo) -> TypeGuard[ValueFieldInfo]:
+    return field_info["field_type"] == "value"
+
+
+def is_image_field(field_info: FieldInfo) -> TypeGuard[ImageFieldInfo]:
+    return field_info["field_type"] == "value"
 
 
 _field_helper = _FieldHelper()
