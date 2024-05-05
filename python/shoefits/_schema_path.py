@@ -92,7 +92,7 @@ class SchemaPath:
 @dataclasses.dataclass
 class SchemaPathName:
     template: str
-    substitutions: tuple[SchemaPath, ...]
+    substitutions: tuple[SchemaPath, ...] = ()
 
     @property
     def is_concrete(self) -> bool:

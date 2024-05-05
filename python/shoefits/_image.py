@@ -1,22 +1,17 @@
 from __future__ import annotations
 
-__all__ = (
-    "Image",
-    "ImageFieldInfo",
-    "make_image_field_info",
-    "MaskFieldInfo",
-    "make_mask_field_info",
-)
+__all__ = ("Image",)
 
 from collections.abc import Callable
-from typing import Any, Literal, TypedDict
+from typing import Any
 
 import numpy as np
 import numpy.typing as npt
 import pydantic
 import pydantic_core.core_schema as pcs
 
-from ._dtypes import NumberType, Unit, UnsignedIntegerType, dtype_to_str
+from ._asdf import NdArray, Quantity
+from ._dtypes import NumberType, Unit, numpy_to_str
 from ._geom import Box, Point
 from ._yaml import YamlModel
 
@@ -68,12 +63,12 @@ class Image:
         raise NotImplementedError()
 
     def _serialize(self, info: pydantic.SerializationInfo) -> ImageReference:
-        result = ArrayReference(
-            source="TODO!", shape=self.bbox.size.shape, datatype=dtype_to_str(self.array.dtype, NumberType)
+        result = NdArray(
+            source="TODO!", shape=self.bbox.size.shape, datatype=numpy_to_str(self.array.dtype, NumberType)
         )
         if self.unit is not None:
             return ImageReference(
-                data=QuantityArrayReference(value=result, unit=self.unit),
+                data=Quantity(value=result, unit=self.unit),
                 start=self.bbox.start,
                 _serialize_extra=self._get_array,
             )
@@ -83,52 +78,14 @@ class Image:
     def __get_pydantic_json_schema__(
         cls, _core_schema: pcs.CoreSchema, handler: pydantic.GetJsonSchemaHandler
     ) -> pydantic.json_schema.JsonSchemaValue:
-        result = handler(ImageReference.__pydantic_core_schema__)
-        result["shoefits"] = {"field_type": "image"}
-        return result
+        return handler(ImageReference.__pydantic_core_schema__)
 
     def _get_array(self) -> np.ndarray:
         return self._array
 
 
-class ArrayReference(YamlModel, yaml_tag="!core/ndarray-1.1.0"):
-    source: str
-    shape: tuple[int, ...]
-    datatype: NumberType
-    byteorder: Literal["big"] = "big"
-
-
-class QuantityArrayReference(YamlModel, yaml_tag="!unit/quantity-1.2.0"):
-    value: ArrayReference
-    unit: Unit
-
-
-class ImageReference(YamlModel, yaml_tag="!shoefits/image"):
-    data: QuantityArrayReference | ArrayReference
+class ImageReference(YamlModel, yaml_tag="!shoefits/image-0.0.1"):
+    data: Quantity | NdArray
     start: Point
 
     _serialize_extra: Callable[[], np.ndarray]
-
-
-class ImageFieldInfo(TypedDict):
-    field_type: Literal["image"]
-    dtype: NumberType
-    unit: Unit | None
-
-
-def make_image_field_info(
-    dtype: npt.DTypeLike, unit: Unit | None = None, field_type: Literal["image"] = "image"
-) -> ImageFieldInfo:
-    return ImageFieldInfo(dtype=dtype_to_str(dtype, NumberType), unit=unit, field_type=field_type)
-
-
-class MaskFieldInfo(TypedDict):
-    field_type: Literal["mask"]
-    dtype: UnsignedIntegerType
-    planes: dict[str, str]  # Plane name to documentation; bit is set by enumerate().
-
-
-def make_mask_field_info(
-    dtype: npt.DTypeLike, planes: dict[str, str], field_type: Literal["mask"] = "mask"
-) -> MaskFieldInfo:
-    return MaskFieldInfo(dtype=dtype_to_str(dtype, UnsignedIntegerType), planes=planes, field_type=field_type)
