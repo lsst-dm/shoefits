@@ -3,5 +3,7 @@
 .coverage
 .pytest_cache/
 .mypy_cache/
+.ruff_cache/
 .vscode/
+.ipynb_checkpoints/
 mypy.log

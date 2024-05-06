@@ -278,8 +278,19 @@ class FitsSchemaConfiguration(ABC):
             return None
         return FitsValueHeaderSchema(key, field_info, path_from_frame)
 
-    def get_extension_label_schema(self, field_info: FieldInfo, path: SchemaPath) -> FitsExtensionLabelSchema:
-        raise NotImplementedError("TODO")
+    def get_extension_label_schema(
+        self, field_info: ImageFieldInfo | MaskFieldInfo, path: SchemaPath
+    ) -> FitsExtensionLabelSchema | None:
+        if field_info.fits_extension is False:
+            return None
+        elif field_info.fits_extension is True or field_info.fits_extension is None:
+            raise NotImplementedError("TODO")
+        else:
+            return FitsExtensionLabelSchema(
+                extname=SchemaPathName(field_info.fits_extension),
+                extver=None,
+                extlevel=len(path),
+            )
 
     def get_image_extension_schema(
         self,
@@ -287,11 +298,13 @@ class FitsSchemaConfiguration(ABC):
         frame_header: Sequence[FitsHeaderSchema],
         frame_path: SchemaPath,
         path_from_frame: SchemaPath,
-    ) -> FitsExtensionSchema:
+    ) -> FitsExtensionSchema | None:
+        if (label := self.get_extension_label_schema(field_info, frame_path.join(path_from_frame))) is None:
+            return None
         header = list(frame_header)
         header.append(FitsImageHeaderSchema(field_info, path_from_frame))
         return FitsExtensionSchema(
-            self.get_extension_label_schema(field_info, frame_path.join(path_from_frame)),
+            label,
             frame_path,
             header,
             FitsImageDataSchema(field_info, path_from_frame),
@@ -303,11 +316,13 @@ class FitsSchemaConfiguration(ABC):
         frame_header: Sequence[FitsHeaderSchema],
         frame_path: SchemaPath,
         path_from_frame: SchemaPath,
-    ) -> FitsExtensionSchema:
+    ) -> FitsExtensionSchema | None:
+        if (label := self.get_extension_label_schema(field_info, frame_path.join(path_from_frame))) is None:
+            return None
         header = list(frame_header)
         header.append(FitsMaskHeaderSchema(field_info, path_from_frame))
         return FitsExtensionSchema(
-            self.get_extension_label_schema(field_info, frame_path.join(path_from_frame)),
+            label,
             frame_path,
             header,
             FitsMaskDataSchema(field_info, path_from_frame),
