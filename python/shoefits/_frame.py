@@ -148,15 +148,28 @@ class Frame(ABC):
 
     @classmethod
     def _resolve_field(cls, name: str, annotation: Any, kwargs: dict[str, Any]) -> FieldInfo:
+        # TODO: refactor at least some of this into FieldInfo classmethods.
         if isinstance(annotation, type):
             if annotation is Image:
                 return ImageFieldInfo.model_validate(kwargs)
             if annotation is Mask:
                 return MaskFieldInfo.model_validate(kwargs)
             if issubclass(annotation, Frame):
-                return FrameFieldInfo(cls=annotation)
+                if not issubclass(kwargs.setdefault("cls", annotation), annotation):
+                    raise TypeError(
+                        f"Annotation {annotation.__name__} for frame field {cls.__name__}.{name} is not "
+                        f"consistent with ccls={kwargs['cls']}."
+                    )
+                return FrameFieldInfo.model_validate(kwargs)
             if issubclass(annotation, astropy.io.fits.Header):
                 return HeaderFieldInfo()
+            if issubclass(annotation, pydantic.BaseModel):
+                if not issubclass(kwargs.setdefault("cls", annotation), annotation):
+                    raise TypeError(
+                        f"Annotation {annotation.__name__} for model field {cls.__name__}.{name} is not "
+                        f"consistent with cls={kwargs['cls']}."
+                    )
+                return ModelFieldInfo.model_validate(kwargs)
             if issubclass(annotation, Mapping):
                 raise TypeError(f"Mapping field {cls.__name__}.{name!r} must have a type annotations.")
             kwargs.setdefault("dtype", annotation)
