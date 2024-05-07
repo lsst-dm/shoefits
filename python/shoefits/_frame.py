@@ -44,7 +44,6 @@ class ValueFieldInfo(FieldInfoBase):
     dtype: ValueType
     unit: Unit | None = None
     fits_header: bool | str = False
-    fits_column: bool | str = True
 
     @pydantic.field_validator("dtype", mode="before")
     @classmethod
@@ -57,7 +56,6 @@ class ImageFieldInfo(FieldInfoBase):
     dtype: NumberType
     unit: Unit | None = None
     fits_image_extension: bool | str = True
-    fits_column: bool | str = True
 
     @pydantic.field_validator("dtype", mode="before")
     @classmethod
@@ -71,7 +69,6 @@ class MaskFieldInfo(FieldInfoBase):
     required_planes: list[MaskPlane] = pydantic.Field(default_factory=list)
     allow_additional_planes: bool = True
     fits_image_extension: bool | str = True
-    fits_column: bool | str = True
 
     @pydantic.field_validator("dtype", mode="before")
     @classmethod
@@ -88,14 +85,6 @@ class FrameFieldInfo(FieldInfoBase):
 class MappingFieldInfo(FieldInfoBase):
     cls: type[Mapping]
     value: FieldInfo
-    fits_table_extension: bool | str = False
-    fits_table_key_column: str | None = "key"
-
-    @pydantic.model_validator(mode="after")
-    def _validate_fits_extensions(self) -> MappingFieldInfo:
-        if self.fits_table_extension and type(self.value) is not FrameFieldInfo:
-            raise ValueError("'fits_table_extension' requires Frame mapping values.")
-        return self
 
 
 @final
@@ -190,13 +179,9 @@ class Frame(ABC):
                 raise TypeError(
                     f"Key type for mapping field {cls.__name__}.{name} must be 'str', not {key_type}."
                 )
-            fits_table_extension = kwargs.pop("fits_table_extension", False)
-            fits_table_key_column = kwargs.pop("fits_table_key_column", False)
             return MappingFieldInfo(
                 cls=origin_type,
                 value=cls._resolve_field(name, value_type, kwargs),
-                fits_table_extension=fits_table_extension,
-                fits_table_key_column=fits_table_key_column,
             )
         raise TypeError(f"Unsupported type {annotation} for field {cls.__name__}.{name}.")
 

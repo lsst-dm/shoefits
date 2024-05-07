@@ -4,9 +4,7 @@ __all__ = (
     "FitsHeaderSchema",
     "FitsValueHeaderSchema",
     "FitsImageHeaderSchema",
-    "FitsColumnSchema",
     "FitsDataSchema",
-    "FitsBinaryTableSchema",
     "FitsImageDataSchema",
     "FitsExtensionLabelSchema",
     "FitsExtensionSchema",
@@ -82,34 +80,8 @@ class FitsMaskHeaderSchema(FitsHeaderSchema):
     """
 
 
-@dataclasses.dataclass
-class FitsColumnSchema:
-    name: SchemaPathName
-    field_info: ValueFieldInfo | ImageFieldInfo | MaskFieldInfo
-    path_from_row: SchemaPath
-
-
 class FitsDataSchema(ABC):
     pass
-
-
-@dataclasses.dataclass
-class FitsBinaryTableSchema(FitsDataSchema):
-    table_path_from_frame: SchemaPath
-    """Path of the container whose whose items make up the rows of this table,
-    relative to `FitsExtensionSchema.frame_path`.
-    """
-
-    key_column_name: str | None
-
-    columns: list[FitsColumnSchema] = dataclasses.field(default_factory=list)
-
-    @property
-    def row_path_from_frame(self) -> SchemaPath:
-        """Path that corresponds to a row of this table, which always maps to
-        a `Frame`.
-        """
-        return self.table_path_from_frame.push(Placeholders.MAPPING)
 
 
 @dataclasses.dataclass
@@ -322,25 +294,6 @@ class FitsSchemaConfiguration(ABC):
         path_from_frame: SchemaPath,
         extlevel: int,
     ) -> list[FitsExtensionSchema]:
-        if field_info.fits_table_extension:
-            if field_info.fits_table_extension is not True:  # i.e. it's a string
-                label = FitsExtensionLabelSchema(
-                    extname=SchemaPathName(field_info.fits_table_extension), extlevel=extlevel
-                )
-            else:
-                label = self.get_extension_label_schema(frame_path.join(path_from_frame), extlevel)
-            assert isinstance(field_info.value, FrameFieldInfo), "Guaranteed by MappingFieldInfo validator."
-            columns: list[FitsColumnSchema] = []
-            for column_field_name, column_field_info in field_info.value.cls.frame_fields.items():
-                columns.extend(self._extract_column_schema(column_field_info, SchemaPath(column_field_name)))
-            return [
-                FitsExtensionSchema(
-                    label=label,
-                    frame_path=frame_path,
-                    header=list(frame_header),
-                    data=FitsBinaryTableSchema(path_from_frame, field_info.fits_table_key_column, columns),
-                )
-            ]
         return self._extract_extension_schema(
             field_info.value,
             frame_header,
@@ -349,43 +302,6 @@ class FitsSchemaConfiguration(ABC):
             extlevel,
         )
 
-    def _extract_column_schema(
-        self, field_info: FieldInfo, path_from_row: SchemaPath
-    ) -> list[FitsColumnSchema]:
-        results: list[FitsColumnSchema] = []
-        match field_info:
-            case ValueFieldInfo() | ImageFieldInfo() | MaskFieldInfo():
-                if (column_schema := self.get_column_schema(field_info, path_from_row)) is not None:
-                    results.append(column_schema)
-            case FrameFieldInfo():
-                for nested_name, nested_field_info in field_info.cls.frame_fields.items():
-                    results.extend(
-                        self._extract_column_schema(nested_field_info, path_from_row.push(nested_name))
-                    )
-            case MappingFieldInfo():
-                results.extend(
-                    self._extract_column_schema(field_info.value, path_from_row.push(Placeholders.MAPPING))
-                )
-        return results
-
-    def get_column_name_schema(self, path_from_row: SchemaPath) -> SchemaPathName:
-        raise NotImplementedError("TODO")
-
-    def get_column_schema(
-        self, field_info: ValueFieldInfo | ImageFieldInfo | MaskFieldInfo, path_from_row: SchemaPath
-    ) -> FitsColumnSchema | None:
-        if not field_info.fits_column:
-            return None
-        if field_info.fits_column is True:
-            name = self.get_column_name_schema(path_from_row)
-        else:
-            name = SchemaPathName(field_info.fits_column)
-        return FitsColumnSchema(name, field_info, path_from_row)
-
 
 # TODO:
-# - mapping keys, image shapes from configuration; identify which ones need
-#   consistency (e.g. mappings inside binary table rows).
 # - override methods for all FieldInfo fits_* options.
-# - grids (including emitting binary tables for extras)
-# - options for dropping binary table exports from tree
