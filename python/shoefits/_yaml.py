@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-__all__ = ("YamlModel", "RestrictedYamlLoader", "DeferredYaml")
+__all__ = ("YamlModel", "RestrictedYamlLoader", "DeferredYaml", "YamlValue")
 
 from collections.abc import Callable
-from typing import Any, ClassVar, cast
+from typing import Any, ClassVar, TypeAlias, Union, cast
 
 import pydantic
 import yaml
@@ -17,7 +17,6 @@ class DeferredYaml:
     def __init__(self, callback: Callable[[yaml.Dumper, Any], yaml.Node], data: Any, extra: Any = None):
         self.callback = callback
         self.data = data
-        self.extra = extra
 
 
 def _yaml_model_represent(dumper: yaml.Dumper, obj: DeferredYaml) -> yaml.Node:
@@ -38,15 +37,13 @@ class YamlModel(pydantic.BaseModel):
     model_config = pydantic.ConfigDict(arbitrary_types_allowed=True)
     yaml_tag: ClassVar[str]
 
-    _serialize_extra: Any | None = None
-
     @pydantic.model_serializer(mode="wrap")
     def _yaml_model_serialize(
         self, handler: pydantic.SerializerFunctionWrapHandler, info: pydantic.SerializationInfo
     ) -> DeferredYaml | dict[str, Any]:
         result = self._serialize(handler, info)
         if info.context is not None and info.context.get("yaml"):
-            return DeferredYaml(self._represent_yaml, result, self._serialize_extra)
+            return DeferredYaml(self._represent_yaml, result)
         return result
 
     def _serialize(
@@ -65,3 +62,6 @@ class YamlModel(pydantic.BaseModel):
     @classmethod
     def _represent_yaml(cls, dumper: yaml.Dumper, data: dict[str, Any]) -> yaml.MappingNode:
         return dumper.represent_mapping(cls.yaml_tag, data)
+
+
+YamlValue: TypeAlias = Union[int, str, float, DeferredYaml, list["YamlValue"], dict[str, "YamlValue"]]

@@ -28,8 +28,9 @@ from ._frame import (
 from ._schema_path import Placeholders, SchemaPath, SchemaPathName
 
 
-class FitsHeaderSchema(ABC):
-    pass
+@dataclasses.dataclass
+class FitsHeaderSchema:
+    path_from_frame: SchemaPath
 
 
 @dataclasses.dataclass
@@ -38,11 +39,8 @@ class FitsValueHeaderSchema(FitsHeaderSchema):
     `int`, or `float` value in the YAML tree.
     """
 
-    key: SchemaPathName
     field_info: ValueFieldInfo
-    path_from_frame: SchemaPath
-    """Path of the value field, relative to `FitsExtensionSchema.frame_path`.
-    """
+    key: SchemaPathName
 
 
 @dataclasses.dataclass
@@ -54,20 +52,12 @@ class FitsOpaqueHeaderSchema(FitsHeaderSchema):
 
     field_info: HeaderFieldInfo
 
-    path_from_frame: SchemaPath
-    """Path of the opaque-header field, relative to
-    `FitsExtensionSchema.frame_path`.
-    """
-
 
 @dataclasses.dataclass
 class FitsImageHeaderSchema(FitsHeaderSchema):
     """Schema definition for FITS headers exported by all `Image` objects."""
 
     field_info: ImageFieldInfo
-    path_from_frame: SchemaPath
-    """Path of the image field, relative to `FitsExtensionSchema.frame_path`.
-    """
 
 
 @dataclasses.dataclass
@@ -75,31 +65,24 @@ class FitsMaskHeaderSchema(FitsHeaderSchema):
     """Schema definition for FITS headers exported by all `Mask` objects."""
 
     field_info: MaskFieldInfo
+
+
+@dataclasses.dataclass
+class FitsDataSchema:
     path_from_frame: SchemaPath
-    """Path of the mask field, relative to `FitsExtensionSchema.frame_path`.
+    """Path of the object that maps to this FITS extension, relative to
+    `FitsExtensionSchema.frame_path`.
     """
-
-
-class FitsDataSchema(ABC):
-    pass
 
 
 @dataclasses.dataclass
 class FitsImageDataSchema(FitsDataSchema):
     field_info: ImageFieldInfo
-    path_from_frame: SchemaPath
-    """Path of the `Image` that maps to this FITS extension, relative to
-    `FitsExtensionSchema.frame_path`.
-    """
 
 
 @dataclasses.dataclass
 class FitsMaskDataSchema(FitsDataSchema):
     field_info: MaskFieldInfo
-    path_from_frame: SchemaPath
-    """Path of the `Mask` that maps to this FITS extension, relative to
-    `FitsExtensionSchema.frame_path`.
-    """
 
 
 @dataclasses.dataclass
@@ -152,9 +135,9 @@ class FitsSchemaConfiguration(ABC):
     ) -> FitsHeaderSchema | None:
         match field_info:
             case ValueFieldInfo():
-                return self.get_value_header_schema(field_info, path_from_frame)
+                return self.get_value_header_schema(path_from_frame, field_info)
             case HeaderFieldInfo():
-                return FitsOpaqueHeaderSchema(field_info, path_from_frame)
+                return FitsOpaqueHeaderSchema(path_from_frame, field_info)
             case MappingFieldInfo():
                 return self._extract_frame_header_schema(
                     field_info.value, path_from_frame.push(Placeholders.MAPPING)
@@ -212,7 +195,7 @@ class FitsSchemaConfiguration(ABC):
         return results
 
     def get_value_header_schema(
-        self, field_info: ValueFieldInfo, path_from_frame: SchemaPath
+        self, path_from_frame: SchemaPath, field_info: ValueFieldInfo
     ) -> FitsValueHeaderSchema | None:
         if field_info.fits_header is True:
             template_terms: list[str] = []
@@ -229,7 +212,7 @@ class FitsSchemaConfiguration(ABC):
             key = SchemaPathName(template=field_info.fits_header)
         else:
             return None
-        return FitsValueHeaderSchema(key, field_info, path_from_frame)
+        return FitsValueHeaderSchema(path_from_frame, field_info, key)
 
     def get_extension_label_schema(
         self, path_from_frame: SchemaPath, extlevel: int
@@ -253,12 +236,12 @@ class FitsSchemaConfiguration(ABC):
         else:
             label = self.get_extension_label_schema(frame_path.join(path_from_frame), extlevel)
         header = list(frame_header)
-        header.append(FitsImageHeaderSchema(field_info, path_from_frame))
+        header.append(FitsImageHeaderSchema(path_from_frame, field_info))
         return FitsExtensionSchema(
             label,
             frame_path,
             header,
-            FitsImageDataSchema(field_info, path_from_frame),
+            FitsImageDataSchema(path_from_frame, field_info),
         )
 
     def get_mask_extension_schema(
@@ -278,12 +261,12 @@ class FitsSchemaConfiguration(ABC):
         else:
             label = self.get_extension_label_schema(frame_path.join(path_from_frame), extlevel)
         header = list(frame_header)
-        header.append(FitsMaskHeaderSchema(field_info, path_from_frame))
+        header.append(FitsMaskHeaderSchema(path_from_frame, field_info))
         return FitsExtensionSchema(
             label,
             frame_path,
             header,
-            FitsMaskDataSchema(field_info, path_from_frame),
+            FitsMaskDataSchema(path_from_frame, field_info),
         )
 
     def get_mapping_extensions_schema(

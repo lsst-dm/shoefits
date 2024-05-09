@@ -1,9 +1,8 @@
 from __future__ import annotations
 
-__all__ = ("Image",)
+__all__ = ("Image", "ImageReference")
 
-from collections.abc import Callable
-from typing import Any
+from typing import Any, Self
 
 import numpy as np
 import numpy.typing as npt
@@ -63,16 +62,7 @@ class Image:
         raise NotImplementedError()
 
     def _serialize(self, info: pydantic.SerializationInfo) -> ImageReference:
-        result = NdArray(
-            source="TODO!", shape=self.bbox.size.shape, datatype=numpy_to_str(self.array.dtype, NumberType)
-        )
-        if self.unit is not None:
-            return ImageReference(
-                data=Quantity(value=result, unit=self.unit),
-                start=self.bbox.start,
-                _serialize_extra=self._get_array,
-            )
-        return ImageReference(data=result, start=self.bbox.start, _serialize_extra=self._get_array)
+        return ImageReference.from_image_and_source(self, "TODO!")
 
     @classmethod
     def __get_pydantic_json_schema__(
@@ -80,12 +70,19 @@ class Image:
     ) -> pydantic.json_schema.JsonSchemaValue:
         return handler(ImageReference.__pydantic_core_schema__)
 
-    def _get_array(self) -> np.ndarray:
-        return self._array
-
 
 class ImageReference(YamlModel, yaml_tag="!shoefits/image-0.0.1"):
     data: Quantity | NdArray
     start: Point
 
-    _serialize_extra: Callable[[], np.ndarray]
+    @classmethod
+    def from_image_and_source(cls, image: Image, source: str) -> Self:
+        data = NdArray(
+            source=source, shape=image.bbox.size.shape, datatype=numpy_to_str(image.array.dtype, NumberType)
+        )
+        if image.unit is not None:
+            return cls(
+                data=Quantity(value=data, unit=image.unit),
+                start=image.bbox.start,
+            )
+        return cls(data=data, start=image.bbox.start)

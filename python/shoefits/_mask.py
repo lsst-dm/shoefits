@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-__all__ = ("Mask",)
+__all__ = ("Mask", "MaskPlane", "MaskSchema", "MaskReference")
 
 import dataclasses
 import math
-from collections.abc import Callable, Iterable, Iterator, Mapping
-from typing import Any
+from collections.abc import Iterable, Iterator, Mapping
+from typing import Any, Self
 
 import numpy as np
 import numpy.typing as npt
@@ -121,14 +121,7 @@ class Mask:
         raise NotImplementedError()
 
     def _serialize(self, info: pydantic.SerializationInfo) -> MaskReference:
-        result = NdArray(
-            source="TODO!",
-            shape=self.bbox.size.shape + (self._schema.mask_size,),
-            datatype=numpy_to_str(self.array.dtype, UnsignedIntegerType),
-        )
-        return MaskReference(
-            data=result, start=self.bbox.start, planes=list(self._schema), _serialize_extra=self._get_array
-        )
+        return MaskReference.from_mask_and_source(self, "TODO!")
 
     @classmethod
     def __get_pydantic_json_schema__(
@@ -145,4 +138,11 @@ class MaskReference(YamlModel, yaml_tag="!shoefits/mask-0.0.1"):
     start: Point
     planes: list[MaskPlane | None]
 
-    _serialize_extra: Callable[[], np.ndarray]
+    @classmethod
+    def from_mask_and_source(cls, mask: Mask, source: str) -> Self:
+        result = NdArray(
+            source=source,
+            shape=mask.bbox.size.shape + (mask._schema.mask_size,),
+            datatype=numpy_to_str(mask.array.dtype, UnsignedIntegerType),
+        )
+        return cls(data=result, start=mask.bbox.start, planes=list(mask._schema))

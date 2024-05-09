@@ -7,8 +7,8 @@ __all__ = (
 )
 
 import dataclasses
-from collections.abc import Iterator
-from typing import Any, ClassVar, Literal, TypeAlias
+from collections.abc import Iterator, Mapping, Sequence
+from typing import Any, ClassVar, Literal, TypeAlias, overload
 
 from ._yaml import DeferredYaml
 
@@ -21,7 +21,7 @@ class Placeholders:
 SchemaPathTerm: TypeAlias = str
 
 
-class SchemaPath:
+class SchemaPath(Sequence[SchemaPathTerm]):
     def __init__(self, *args: SchemaPathTerm):
         self._terms = args
 
@@ -49,6 +49,17 @@ class SchemaPath:
 
     def __iter__(self) -> Iterator[SchemaPathTerm]:
         return iter(self._terms)
+
+    @overload
+    def __getitem__(self, i: int) -> SchemaPathTerm: ...
+
+    @overload
+    def __getitem__(self, i: slice) -> SchemaPath: ...
+
+    def __getitem__(self, i: int | slice) -> SchemaPathTerm | SchemaPath:
+        if type(i) is slice:
+            return SchemaPath(*self._terms[i])
+        return self._terms[i]
 
     def __len__(self) -> int:
         return len(self)
@@ -97,3 +108,6 @@ class SchemaPathName:
     @property
     def is_concrete(self) -> bool:
         return not self.substitutions
+
+    def format(self, subs: Mapping[SchemaPath, str]) -> str:
+        return self.template.format(*[subs[k] for k in self.substitutions])
