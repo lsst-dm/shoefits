@@ -27,7 +27,7 @@ dependencies = [
 
 [project.optional-dependencies]
 test = [
-    "pytest >= 3.2",
+    "pytest >= 8.2",
 ]
 
 [tool.setuptools.packages.find]
