@@ -12,9 +12,7 @@ import numpy as np
 import pydantic
 
 from ._dtypes import BUILTIN_TYPES
-from ._fits_schema import FitsExtensionLabelSchema, FitsExtensionSchema
-from ._frame import (
-    Frame,
+from ._field_info import (
     FrameFieldInfo,
     HeaderFieldInfo,
     ImageFieldInfo,
@@ -23,6 +21,8 @@ from ._frame import (
     ModelFieldInfo,
     ValueFieldInfo,
 )
+from ._fits_schema import FitsExtensionLabelSchema, FitsExtensionSchema
+from ._frame import Frame
 from ._image import Image, ImageReference
 from ._mask import Mask, MaskReference
 from ._schema_path import Placeholders, SchemaPath

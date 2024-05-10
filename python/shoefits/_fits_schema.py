@@ -15,9 +15,8 @@ import dataclasses
 from abc import ABC
 from collections.abc import Sequence
 
-from ._frame import (
+from ._field_info import (
     FieldInfo,
-    Frame,
     FrameFieldInfo,
     HeaderFieldInfo,
     ImageFieldInfo,
@@ -25,6 +24,7 @@ from ._frame import (
     MaskFieldInfo,
     ValueFieldInfo,
 )
+from ._frame import Frame
 from ._schema_path import Placeholders, SchemaPath, SchemaPathName
 
 

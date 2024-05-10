@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-__all__ = ("ValueFieldInfo", "ImageFieldInfo", "Frame", "Field", "Image")
+__all__ = ("Frame", "Field", "Image")
 
 from abc import ABC
 from collections.abc import Mapping
@@ -8,104 +8,14 @@ from typing import (
     Any,
     ClassVar,
     Generic,
-    TypeAlias,
     TypeVar,
-    Union,
-    final,
-    get_args,
-    get_origin,
     get_type_hints,
 )
 
-import astropy.io.fits
-import pydantic
-
-from ._dtypes import (
-    BUILTIN_TYPES,
-    NUMPY_TYPES,
-    NumberType,
-    Unit,
-    UnsignedIntegerType,
-    ValueType,
-    numpy_to_str,
-)
+from ._field_info import FieldInfo, _build_field_info
 from ._image import Image
-from ._mask import Mask, MaskPlane
 
 _T = TypeVar("_T")
-
-
-class FieldInfoBase(pydantic.BaseModel):
-    pass
-
-
-@final
-class ValueFieldInfo(FieldInfoBase):
-    dtype: ValueType
-    unit: Unit | None = None
-    fits_header: bool | str = False
-
-    @pydantic.field_validator("dtype", mode="before")
-    @classmethod
-    def _accept_numpy(cls, v: Any) -> ValueType:
-        return numpy_to_str(v, ValueType)
-
-
-@final
-class ImageFieldInfo(FieldInfoBase):
-    dtype: NumberType
-    unit: Unit | None = None
-    fits_image_extension: bool | str = True
-
-    @pydantic.field_validator("dtype", mode="before")
-    @classmethod
-    def _accept_numpy(cls, v: Any) -> NumberType:
-        return numpy_to_str(v, NumberType)
-
-
-@final
-class MaskFieldInfo(FieldInfoBase):
-    dtype: UnsignedIntegerType
-    required_planes: list[MaskPlane] = pydantic.Field(default_factory=list)
-    allow_additional_planes: bool = True
-    fits_image_extension: bool | str = True
-
-    @pydantic.field_validator("dtype", mode="before")
-    @classmethod
-    def _accept_numpy(cls, v: Any) -> NumberType:
-        return numpy_to_str(v, NumberType)
-
-
-@final
-class FrameFieldInfo(FieldInfoBase):
-    cls: type[Frame]
-
-
-@final
-class MappingFieldInfo(FieldInfoBase):
-    cls: type[Mapping]
-    value: FieldInfo
-
-
-@final
-class ModelFieldInfo(FieldInfoBase):
-    cls: type[pydantic.BaseModel]
-
-
-@final
-class HeaderFieldInfo(FieldInfoBase):
-    pass
-
-
-FieldInfo: TypeAlias = Union[
-    ValueFieldInfo,
-    ImageFieldInfo,
-    MaskFieldInfo,
-    MappingFieldInfo,
-    ModelFieldInfo,
-    HeaderFieldInfo,
-    FrameFieldInfo,
-]
 
 
 class Frame(ABC):
@@ -130,60 +40,11 @@ class Frame(ABC):
                         f"Frame field {cls.__name__}.{name} does not have a type annotation."
                     ) from None
                 try:
-                    frame_fields[name] = cls._resolve_field(name, annotation, kwargs)
+                    frame_fields[name] = _build_field_info(cls, name, annotation, kwargs)
                 except Exception as err:
                     raise TypeError(f"Error in definition for field {name!r}.") from err
-        cls.frame_fields = frame_fields
 
-    @classmethod
-    def _resolve_field(cls, name: str, annotation: Any, kwargs: dict[str, Any]) -> FieldInfo:
-        # TODO: refactor at least some of this into FieldInfo classmethods.
-        if isinstance(annotation, type):
-            if annotation is Image:
-                return ImageFieldInfo.model_validate(kwargs)
-            if annotation is Mask:
-                return MaskFieldInfo.model_validate(kwargs)
-            if issubclass(annotation, Frame):
-                if not issubclass(kwargs.setdefault("cls", annotation), annotation):
-                    raise TypeError(
-                        f"Annotation {annotation.__name__} for frame field {cls.__name__}.{name} is not "
-                        f"consistent with ccls={kwargs['cls']}."
-                    )
-                return FrameFieldInfo.model_validate(kwargs)
-            if issubclass(annotation, astropy.io.fits.Header):
-                return HeaderFieldInfo()
-            if issubclass(annotation, pydantic.BaseModel):
-                if not issubclass(kwargs.setdefault("cls", annotation), annotation):
-                    raise TypeError(
-                        f"Annotation {annotation.__name__} for model field {cls.__name__}.{name} is not "
-                        f"consistent with cls={kwargs['cls']}."
-                    )
-                return ModelFieldInfo.model_validate(kwargs)
-            if issubclass(annotation, Mapping):
-                raise TypeError(f"Mapping field {cls.__name__}.{name!r} must have a type annotations.")
-            kwargs.setdefault("dtype", annotation)
-            field_info = ValueFieldInfo.model_validate(kwargs)
-            if (
-                BUILTIN_TYPES[field_info.dtype] is not annotation
-                and NUMPY_TYPES[field_info.dtype] is not annotation
-            ):
-                raise TypeError(
-                    f"Annotation {annotation} for field {cls.__name__}.{name} is not consistent "
-                    f"with dtype={field_info.dtype!r}."
-                )
-            return field_info
-        origin_type = get_origin(annotation)
-        if issubclass(origin_type, Mapping):
-            key_type, value_type = get_args(annotation)
-            if key_type is not str:
-                raise TypeError(
-                    f"Key type for mapping field {cls.__name__}.{name} must be 'str', not {key_type}."
-                )
-            return MappingFieldInfo(
-                cls=origin_type,
-                value=cls._resolve_field(name, value_type, kwargs),
-            )
-        raise TypeError(f"Unsupported type {annotation} for field {cls.__name__}.{name}.")
+        cls.frame_fields = frame_fields
 
     _frame_data: dict[str, Any]
     frame_fields: ClassVar[Mapping[str, FieldInfo]]
