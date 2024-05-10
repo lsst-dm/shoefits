@@ -20,8 +20,9 @@ keywords = ["lsst"]
 dependencies = [
     "astropy >=6.0",
     "pydantic >=2.7,<3.0",
-    "numpy >= 1.20",
-    "jsonpointer > 2.0",
+    "numpy >=1.20",
+    "jsonpointer >=2.0",
+    "pyyaml >=6.0"
 ]
 
 [project.optional-dependencies]
