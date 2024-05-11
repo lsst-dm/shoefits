@@ -1,2 +1,2 @@
 from ._dtypes import *
-from ._frame import *
+from ._struct import *

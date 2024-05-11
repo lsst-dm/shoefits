@@ -4,13 +4,13 @@ __all__ = (
     "ValueFieldInfo",
     "ImageFieldInfo",
     "MaskFieldInfo",
-    "FrameFieldInfo",
+    "StructFieldInfo",
     "MappingFieldInfo",
     "ModelFieldInfo",
     "HeaderFieldInfo",
 )
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from typing import TYPE_CHECKING, Any, TypeAlias, TypeVar, Union, cast, final, get_args, get_origin
 
 import astropy.io.fits
@@ -25,13 +25,14 @@ from ._dtypes import (
     ValueType,
     numpy_to_str,
 )
+from ._frame import Frame
 from ._image import Image
 from ._mask import Mask, MaskPlane
 
 _T = TypeVar("_T")
 
 if TYPE_CHECKING:
-    from ._frame import Frame
+    from ._struct import Struct
 
 
 class FieldInfoBase(pydantic.BaseModel):
@@ -46,7 +47,7 @@ class ValueFieldInfo(FieldInfoBase):
 
     @classmethod
     def build(
-        cls, name: str, frame_type: type[Frame], annotation: type[object], **kwargs: Any
+        cls, name: str, struct_type: type[Struct], annotation: type[object], **kwargs: Any
     ) -> ValueFieldInfo:
         kwargs.setdefault("dtype", annotation)
         field_info = cls.model_validate(kwargs)
@@ -55,7 +56,7 @@ class ValueFieldInfo(FieldInfoBase):
             and NUMPY_TYPES[field_info.dtype] is not annotation
         ):
             raise TypeError(
-                f"Annotation {annotation} for field {frame_type.__name__}.{name} is not consistent "
+                f"Annotation {annotation} for field {struct_type.__name__}.{name} is not consistent "
                 f"with dtype={field_info.dtype!r}."
             )
         return field_info
@@ -74,7 +75,7 @@ class ImageFieldInfo(FieldInfoBase):
 
     @classmethod
     def build(
-        cls, name: str, frame_type: type[Frame], annotation: type[Image], **kwargs: Any
+        cls, name: str, struct_type: type[Struct], annotation: type[Image], **kwargs: Any
     ) -> ImageFieldInfo:
         return ImageFieldInfo.model_validate(kwargs)
 
@@ -93,7 +94,7 @@ class MaskFieldInfo(FieldInfoBase):
 
     @classmethod
     def build(
-        cls, name: str, frame_type: type[Frame], annotation: type[Mask], **kwargs: Any
+        cls, name: str, struct_type: type[Struct], annotation: type[Mask], **kwargs: Any
     ) -> MaskFieldInfo:
         return MaskFieldInfo.model_validate(kwargs)
 
@@ -104,19 +105,21 @@ class MaskFieldInfo(FieldInfoBase):
 
 
 @final
-class FrameFieldInfo(FieldInfoBase):
-    cls: type[Frame]
+class StructFieldInfo(FieldInfoBase):
+    cls: type[Struct]
+    is_frame: bool
 
     @classmethod
     def build(
-        cls, name: str, frame_type: type[Frame], annotation: type[Frame], **kwargs: Any
-    ) -> FrameFieldInfo:
+        cls, name: str, struct_type: type[Struct], annotation: type[Struct], **kwargs: Any
+    ) -> StructFieldInfo:
         if not issubclass(kwargs.setdefault("cls", annotation), annotation):
             raise TypeError(
-                f"Annotation {annotation.__name__} for frame field {frame_type.__name__}.{name} is not "
+                f"Annotation {annotation.__name__} for frame field {struct_type.__name__}.{name} is not "
                 f"consistent with cls={kwargs['cls']}."
             )
-        return FrameFieldInfo.model_validate(kwargs)
+        kwargs["is_frame"] = issubclass(kwargs["cls"], Frame)
+        return StructFieldInfo.model_validate(kwargs)
 
 
 @final
@@ -128,7 +131,7 @@ class MappingFieldInfo(FieldInfoBase):
     def build(
         cls,
         name: str,
-        frame_type: type[Frame],
+        struct_type: type[Struct],
         origin_type: type[Mapping[str, Any]],
         annotation: Any,
         **kwargs: Any,
@@ -136,11 +139,32 @@ class MappingFieldInfo(FieldInfoBase):
         key_type, value_type = get_args(annotation)
         if key_type is not str:
             raise TypeError(
-                f"Key type for mapping field {frame_type.__name__}.{name} must be 'str', not {key_type}."
+                f"Key type for mapping field {struct_type.__name__}.{name} must be 'str', not {key_type}."
             )
         return MappingFieldInfo(
             cls=origin_type,
-            value=_build_field_info(frame_type, name, value_type, kwargs),
+            value=_build_field_info(struct_type, name, value_type, kwargs),
+        )
+
+
+@final
+class SequenceFieldInfo(FieldInfoBase):
+    cls: type[Sequence]
+    value: FieldInfo
+
+    @classmethod
+    def build(
+        cls,
+        name: str,
+        struct_type: type[Struct],
+        origin_type: type[Sequence[Any]],
+        annotation: Any,
+        **kwargs: Any,
+    ) -> SequenceFieldInfo:
+        value_type = get_args(annotation)
+        return SequenceFieldInfo(
+            cls=origin_type,
+            value=_build_field_info(struct_type, name, value_type, kwargs),
         )
 
 
@@ -150,11 +174,11 @@ class ModelFieldInfo(FieldInfoBase):
 
     @classmethod
     def build(
-        cls, name: str, frame_type: type[Frame], annotation: type[pydantic.BaseModel], **kwargs: Any
+        cls, name: str, struct_type: type[Struct], annotation: type[pydantic.BaseModel], **kwargs: Any
     ) -> ModelFieldInfo:
         if not issubclass(kwargs.setdefault("cls", annotation), annotation):
             raise TypeError(
-                f"Annotation {annotation.__name__} for model field {frame_type.__name__}.{name} is not "
+                f"Annotation {annotation.__name__} for model field {struct_type.__name__}.{name} is not "
                 f"consistent with cls={kwargs['cls']}."
             )
         return ModelFieldInfo.model_validate(kwargs)
@@ -164,7 +188,7 @@ class ModelFieldInfo(FieldInfoBase):
 class HeaderFieldInfo(FieldInfoBase):
     @classmethod
     def build(
-        cls, name: str, frame_type: type[Frame], annotation: type[astropy.io.fits.Header], **kwargs: Any
+        cls, name: str, struct_type: type[Struct], annotation: type[astropy.io.fits.Header], **kwargs: Any
     ) -> HeaderFieldInfo:
         return HeaderFieldInfo.model_validate(kwargs)
 
@@ -174,33 +198,38 @@ FieldInfo: TypeAlias = Union[
     ImageFieldInfo,
     MaskFieldInfo,
     MappingFieldInfo,
+    SequenceFieldInfo,
     ModelFieldInfo,
     HeaderFieldInfo,
-    FrameFieldInfo,
+    StructFieldInfo,
 ]
 
 
 def _build_field_info(
-    frame_type: type[Frame], name: str, annotation: Any, kwargs: dict[str, Any]
+    struct_type: type[Struct], name: str, annotation: Any, kwargs: dict[str, Any]
 ) -> FieldInfo:
     # TODO: refactor at least some of this into FieldInfo classmethods.
     if isinstance(annotation, type):
         if annotation is Image:
-            return ImageFieldInfo.build(name, frame_type, annotation, **kwargs)
+            return ImageFieldInfo.build(name, struct_type, annotation, **kwargs)
         if annotation is Mask:
-            return MaskFieldInfo.build(name, frame_type, annotation, **kwargs)
-        if issubclass(annotation, Frame):
-            return FrameFieldInfo.build(name, frame_type, annotation, **kwargs)
+            return MaskFieldInfo.build(name, struct_type, annotation, **kwargs)
+        if issubclass(annotation, Struct):
+            return StructFieldInfo.build(name, struct_type, annotation, **kwargs)
         if issubclass(annotation, pydantic.BaseModel):
-            return ModelFieldInfo.build(name, frame_type, annotation, **kwargs)
+            return ModelFieldInfo.build(name, struct_type, annotation, **kwargs)
         if issubclass(annotation, astropy.io.fits.Header):
-            return HeaderFieldInfo.build(name, frame_type, annotation, **kwargs)
+            return HeaderFieldInfo.build(name, struct_type, annotation, **kwargs)
         if issubclass(annotation, Mapping):
-            raise TypeError(f"Mapping field {frame_type.__name__}.{name!r} must have a type annotations.")
-        return ValueFieldInfo.build(name, frame_type, annotation, **kwargs)
+            raise TypeError(f"Mapping field {struct_type.__name__}.{name!r} must have a type annotations.")
+        return ValueFieldInfo.build(name, struct_type, annotation, **kwargs)
     origin_type = get_origin(annotation)
     if issubclass(origin_type, Mapping):
         return MappingFieldInfo.build(
-            name, frame_type, cast(type[Mapping[str, Any]], origin_type), annotation, **kwargs
+            name, struct_type, cast(type[Mapping[str, Any]], origin_type), annotation, **kwargs
         )
-    raise TypeError(f"Unsupported type {annotation} for field {frame_type.__name__}.{name}.")
+    if issubclass(origin_type, Sequence):
+        return SequenceFieldInfo.build(
+            name, struct_type, cast(type[Sequence[Any]], origin_type), annotation, **kwargs
+        )
+    raise TypeError(f"Unsupported type {annotation} for field {struct_type.__name__}.{name}.")

@@ -13,19 +13,19 @@ import pydantic
 
 from ._dtypes import BUILTIN_TYPES
 from ._field_info import (
-    FrameFieldInfo,
     HeaderFieldInfo,
     ImageFieldInfo,
     MappingFieldInfo,
     MaskFieldInfo,
     ModelFieldInfo,
+    StructFieldInfo,
     ValueFieldInfo,
 )
 from ._fits_schema import FitsExtensionLabelSchema, FitsExtensionSchema
-from ._frame import Frame
 from ._image import Image, ImageReference
 from ._mask import Mask, MaskReference
 from ._schema_path import Placeholders, SchemaPath
+from ._struct import Struct
 from ._yaml import YamlValue
 
 
@@ -67,7 +67,7 @@ class FitsExtensionWriter:
 
 
 class FitsWriter:
-    def __init__(self, schema: list[FitsExtensionSchema], frame: Frame):
+    def __init__(self, schema: list[FitsExtensionSchema], frame: Struct):
         self.schema: dict[SchemaPath, FitsExtensionSchema] = {
             ext_schema.frame_path.join(ext_schema.data.path_from_frame): ext_schema for ext_schema in schema
         }
@@ -76,12 +76,12 @@ class FitsWriter:
 
     def _walk_frame(
         self,
-        frame: Frame,
+        frame: Struct,
         path: SchemaPath,
         frame_subs: Mapping[SchemaPath, str],
     ) -> YamlValue:
         result: dict[str, YamlValue] = {}
-        for name, field_info in frame.frame_fields.items():
+        for name, field_info in frame.struct_fields.items():
             value = getattr(frame, name)
             match field_info:
                 case ValueFieldInfo():
@@ -107,8 +107,8 @@ class FitsWriter:
                     # Header fields do not go in the YAML tree, and we pull
                     # them into the FITS header when we make the extensions.
                     pass
-                case FrameFieldInfo():
-                    result[name] = self._walk_frame(cast(Frame, value), path.push(name), frame_subs)
+                case StructFieldInfo():
+                    result[name] = self._walk_frame(cast(Struct, value), path.push(name), frame_subs)
         # TODO: Wrap result in YamlDeferred to add a tag.
         return result
 
@@ -201,9 +201,9 @@ class FitsWriter:
                 # Header fields do not go in the YAML tree, and we pull
                 # them into the FITS header when we make the extensions.
                 pass
-            case FrameFieldInfo():
+            case StructFieldInfo():
                 return {
-                    k: self._walk_frame(cast(Frame, v), frame_path.join(path_from_frame).push(k), frame_subs)
+                    k: self._walk_frame(cast(Struct, v), frame_path.join(path_from_frame).push(k), frame_subs)
                     for k, v in mapping.items()
                 }
         raise AssertionError()

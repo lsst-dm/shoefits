@@ -17,11 +17,12 @@ from collections.abc import Sequence
 
 from ._field_info import (
     FieldInfo,
-    FrameFieldInfo,
     HeaderFieldInfo,
     ImageFieldInfo,
     MappingFieldInfo,
     MaskFieldInfo,
+    SequenceFieldInfo,
+    StructFieldInfo,
     ValueFieldInfo,
 )
 from ._frame import Frame
@@ -114,13 +115,13 @@ class FitsSchemaConfiguration(ABC):
         extlevel: int,
     ) -> list[FitsExtensionSchema]:
         frame_header = list(parent_header)
-        for field_name, field_info in frame_type.frame_fields.items():
+        for field_name, field_info in frame_type.struct_fields.items():
             if (
                 header_schema := self._extract_frame_header_schema(field_info, SchemaPath(field_name))
             ) is not None:
                 frame_header.append(header_schema)
         results: list[FitsExtensionSchema] = []
-        for field_name, field_info in frame_type.frame_fields.items():
+        for field_name, field_info in frame_type.struct_fields.items():
             results.extend(
                 self._extract_extension_schema(
                     field_info, frame_header, path, SchemaPath(field_name), extlevel
@@ -186,12 +187,10 @@ class FitsSchemaConfiguration(ABC):
                         extlevel=extlevel,
                     )
                 )
-            case FrameFieldInfo():
-                results.extend(
-                    self._walk_frame(
-                        field_info.cls, frame_header, frame_path.join(path_from_frame), extlevel=extlevel + 1
-                    )
-                )
+            case SequenceFieldInfo():
+                raise NotImplementedError("TODO")
+            case StructFieldInfo():
+                raise NotImplementedError("TODO")
         return results
 
     def get_value_header_schema(
