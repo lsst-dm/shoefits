@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-__all__ = ("YamlModel", "RestrictedYamlLoader", "DeferredYaml", "YamlValue")
+__all__ = ("YamlModel", "RestrictedYamlLoader", "DeferredYaml", "YamlValue", "yaml_represent_mapping")
 
 from collections.abc import Callable
 from typing import Any, ClassVar, TypeAlias, Union, cast
@@ -14,13 +14,14 @@ class RestrictedYamlLoader(yaml.SafeLoader):
 
 
 class DeferredYaml:
-    def __init__(self, callback: Callable[[yaml.Dumper, Any], yaml.Node], data: Any, extra: Any = None):
+    def __init__(self, callback: Callable[[yaml.Dumper, Any, str], yaml.Node], data: Any, tag: str):
         self.callback = callback
         self.data = data
+        self.tag = tag
 
 
 def _yaml_model_represent(dumper: yaml.Dumper, obj: DeferredYaml) -> yaml.Node:
-    return obj.callback(dumper, obj.data)
+    return obj.callback(dumper, obj.data, obj.tag)
 
 
 yaml.add_representer(DeferredYaml, _yaml_model_represent)
@@ -43,7 +44,7 @@ class YamlModel(pydantic.BaseModel):
     ) -> DeferredYaml | dict[str, Any]:
         result = self._serialize(handler, info)
         if info.context is not None and info.context.get("yaml"):
-            return DeferredYaml(self._represent_yaml, result)
+            return DeferredYaml(yaml_represent_mapping, result, self.yaml_tag)
         return result
 
     def _serialize(
@@ -59,9 +60,9 @@ class YamlModel(pydantic.BaseModel):
     ) -> YamlModel:
         return cls.model_validate(loader.construct_mapping(cast(yaml.MappingNode, node)))
 
-    @classmethod
-    def _represent_yaml(cls, dumper: yaml.Dumper, data: dict[str, Any]) -> yaml.MappingNode:
-        return dumper.represent_mapping(cls.yaml_tag, data)
+
+YamlValue: TypeAlias = Union[int, str, float, DeferredYaml, None, list["YamlValue"], dict[str, "YamlValue"]]
 
 
-YamlValue: TypeAlias = Union[int, str, float, DeferredYaml, list["YamlValue"], dict[str, "YamlValue"]]
+def yaml_represent_mapping(dumper: yaml.Dumper, data: dict[str, YamlValue], tag: str) -> yaml.MappingNode:
+    return dumper.represent_mapping(tag, data)

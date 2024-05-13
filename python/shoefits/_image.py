@@ -9,7 +9,7 @@ import numpy.typing as npt
 import pydantic
 import pydantic_core.core_schema as pcs
 
-from ._asdf import NdArray, Quantity
+from ._asdf import BlockWriter, NdArray, Quantity
 from ._dtypes import NumberType, Unit, numpy_to_str
 from ._geom import Box, Point
 from ._yaml import YamlModel
@@ -62,7 +62,10 @@ class Image:
         raise NotImplementedError()
 
     def _serialize(self, info: pydantic.SerializationInfo) -> ImageReference:
-        return ImageReference.from_image_and_source(self, "TODO!")
+        if info.context is None or "block_writer" not in info.context:
+            raise NotImplementedError("Inline arrays not yet supported.")
+        writer: BlockWriter = info.context["block_writer"]
+        return ImageReference.from_image_and_source(self, writer.add_array(self.array))
 
     @classmethod
     def __get_pydantic_json_schema__(
@@ -74,9 +77,10 @@ class Image:
 class ImageReference(YamlModel, yaml_tag="!shoefits/image-0.0.1"):
     data: Quantity | NdArray
     start: Point
+    address: int | None = None
 
     @classmethod
-    def from_image_and_source(cls, image: Image, source: str) -> Self:
+    def from_image_and_source(cls, image: Image, source: str | int) -> Self:
         data = NdArray(
             source=source, shape=image.bbox.size.shape, datatype=numpy_to_str(image.array.dtype, NumberType)
         )
@@ -86,3 +90,11 @@ class ImageReference(YamlModel, yaml_tag="!shoefits/image-0.0.1"):
                 start=image.bbox.start,
             )
         return cls(data=data, start=image.bbox.start)
+
+    def _serialize(
+        self, handler: pydantic.SerializerFunctionWrapHandler, info: pydantic.SerializationInfo
+    ) -> dict[str, Any]:
+        result = handler(self)
+        if info.context is not None:
+            info.context["addressed"] = result
+        return result

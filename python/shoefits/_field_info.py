@@ -6,12 +6,13 @@ __all__ = (
     "MaskFieldInfo",
     "StructFieldInfo",
     "MappingFieldInfo",
+    "SequenceFieldInfo",
     "ModelFieldInfo",
     "HeaderFieldInfo",
 )
 
 from collections.abc import Mapping, Sequence
-from typing import TYPE_CHECKING, Any, TypeAlias, TypeVar, Union, cast, final, get_args, get_origin
+from typing import TYPE_CHECKING, Any, Literal, TypeAlias, TypeVar, Union, cast, final, get_args, get_origin
 
 import astropy.io.fits
 import pydantic
@@ -36,7 +37,7 @@ if TYPE_CHECKING:
 
 
 class FieldInfoBase(pydantic.BaseModel):
-    pass
+    description: str = ""
 
 
 @final
@@ -91,6 +92,7 @@ class MaskFieldInfo(FieldInfoBase):
     required_planes: list[MaskPlane] = pydantic.Field(default_factory=list)
     allow_additional_planes: bool = True
     fits_image_extension: bool | str = True
+    fits_plane_header_style: Literal["afw"] | None = "afw"
 
     @classmethod
     def build(
@@ -208,7 +210,6 @@ FieldInfo: TypeAlias = Union[
 def _build_field_info(
     struct_type: type[Struct], name: str, annotation: Any, kwargs: dict[str, Any]
 ) -> FieldInfo:
-    # TODO: refactor at least some of this into FieldInfo classmethods.
     if isinstance(annotation, type):
         if annotation is Image:
             return ImageFieldInfo.build(name, struct_type, annotation, **kwargs)
