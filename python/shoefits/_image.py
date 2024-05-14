@@ -4,25 +4,25 @@ __all__ = ("Image", "ImageReference")
 
 from typing import Any, Self
 
+import astropy.units
 import numpy as np
 import numpy.typing as npt
 import pydantic
 import pydantic_core.core_schema as pcs
 
-from ._asdf import BlockWriter, NdArray, Quantity, Unit
+from . import asdf_utils
 from ._dtypes import NumberType, numpy_to_str
 from ._geom import Box, Point
-from ._yaml import YamlModel
 
 
 class Image:
-    def __init__(self, array: np.ndarray, bbox: Box, unit: Unit | None = None):
+    def __init__(self, array: np.ndarray, bbox: Box, unit: astropy.units.Unit | None = None):
         self._array = array
         self._bbox = bbox
         self._unit = unit
 
     @classmethod
-    def from_zeros(cls, dtype: npt.DTypeLike, bbox: Box, unit: Unit | None = None) -> Image:
+    def from_zeros(cls, dtype: npt.DTypeLike, bbox: Box, unit: astropy.units.Unit | None = None) -> Image:
         return cls(np.zeros(bbox.size.shape, dtype=dtype), bbox, unit)
 
     @property
@@ -34,7 +34,7 @@ class Image:
         self._array[:, :] = value
 
     @property
-    def unit(self) -> Unit | None:
+    def unit(self) -> astropy.units.Unit | None:
         return self._unit
 
     @property
@@ -64,7 +64,7 @@ class Image:
     def _serialize(self, info: pydantic.SerializationInfo) -> ImageReference:
         if info.context is None or "block_writer" not in info.context:
             raise NotImplementedError("Inline arrays not yet supported.")
-        writer: BlockWriter = info.context["block_writer"]
+        writer: asdf_utils.BlockWriter = info.context["block_writer"]
         return ImageReference.from_image_and_source(self, writer.add_array(self.array))
 
     @classmethod
@@ -74,23 +74,24 @@ class Image:
         return handler(ImageReference.__pydantic_core_schema__)
 
 
-class ImageReference(YamlModel, yaml_tag="!shoefits/image-0.0.1"):
-    data: Quantity | NdArray
+class ImageReference(pydantic.BaseModel):
+    data: asdf_utils.Quantity | asdf_utils.NdArray
     start: Point
     address: int | None = None
 
     @classmethod
     def from_image_and_source(cls, image: Image, source: str | int) -> Self:
-        data = NdArray(
+        data = asdf_utils.NdArray(
             source=source, shape=image.bbox.size.shape, datatype=numpy_to_str(image.array.dtype, NumberType)
         )
         if image.unit is not None:
             return cls(
-                data=Quantity(value=data, unit=image.unit),
+                data=asdf_utils.Quantity(value=data, unit=image.unit),
                 start=image.bbox.start,
             )
         return cls(data=data, start=image.bbox.start)
 
+    @pydantic.model_serializer(mode="wrap")
     def _serialize(
         self, handler: pydantic.SerializerFunctionWrapHandler, info: pydantic.SerializationInfo
     ) -> dict[str, Any]:

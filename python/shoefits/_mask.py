@@ -12,10 +12,9 @@ import numpy.typing as npt
 import pydantic
 import pydantic_core.core_schema as pcs
 
-from ._asdf import BlockWriter, NdArray
+from . import asdf_utils
 from ._dtypes import UnsignedIntegerType, numpy_to_str
 from ._geom import Box, Point
-from ._yaml import YamlModel
 
 
 @dataclasses.dataclass(frozen=True)
@@ -123,7 +122,7 @@ class Mask:
     def _serialize(self, info: pydantic.SerializationInfo) -> MaskReference:
         if info.context is None or "block_writer" not in info.context:
             raise NotImplementedError("Inline arrays not yet supported.")
-        writer: BlockWriter = info.context["block_writer"]
+        writer: asdf_utils.BlockWriter = info.context["block_writer"]
         return MaskReference.from_mask_and_source(self, writer.add_array(self.array))
 
     @classmethod
@@ -136,21 +135,22 @@ class Mask:
         return self._array
 
 
-class MaskReference(YamlModel, yaml_tag="!shoefits/mask-0.0.1"):
-    data: NdArray
+class MaskReference(pydantic.BaseModel):
+    data: asdf_utils.NdArray
     start: Point
     planes: list[MaskPlane | None]
     address: int | None = None
 
     @classmethod
     def from_mask_and_source(cls, mask: Mask, source: str | int) -> Self:
-        result = NdArray(
+        result = asdf_utils.NdArray(
             source=source,
             shape=mask.bbox.size.shape + (mask._schema.mask_size,),
             datatype=numpy_to_str(mask.array.dtype, UnsignedIntegerType),
         )
         return cls(data=result, start=mask.bbox.start, planes=list(mask._schema))
 
+    @pydantic.model_serializer(mode="wrap")
     def _serialize(
         self, handler: pydantic.SerializerFunctionWrapHandler, info: pydantic.SerializationInfo
     ) -> dict[str, Any]:

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 __all__ = (
+    "JsonValue",
     "JsonSchema",
     "ObjectJsonSchema",
     "ArrayJsonSchema",
@@ -12,6 +13,9 @@ __all__ = (
 
 
 from typing import Any, Literal, TypeAlias, TypedDict, Union
+
+JsonValue: TypeAlias = Union[int, str, float, None, list["JsonValue"], dict[str, "JsonValue"]]
+
 
 JsonSchemaCommon = TypedDict(
     "JsonSchemaCommon",

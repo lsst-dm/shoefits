@@ -17,7 +17,7 @@ from typing import TYPE_CHECKING, Any, Literal, TypeAlias, Union, cast, final, g
 import astropy.io.fits
 import pydantic
 
-from ._asdf import Unit
+from . import asdf_utils
 from ._dtypes import (
     BUILTIN_TYPES,
     NUMPY_TYPES,
@@ -41,7 +41,7 @@ class FieldInfoBase(pydantic.BaseModel):
 @final
 class ValueFieldInfo(FieldInfoBase):
     dtype: ValueType
-    unit: Unit | None = None
+    unit: asdf_utils.Unit | None = None
     fits_header: bool | str = False
 
     @classmethod
@@ -69,7 +69,7 @@ class ValueFieldInfo(FieldInfoBase):
 @final
 class ImageFieldInfo(FieldInfoBase):
     dtype: NumberType
-    unit: Unit | None = None
+    unit: asdf_utils.Unit | None = None
     fits_image_extension: bool | str = True
 
     @classmethod

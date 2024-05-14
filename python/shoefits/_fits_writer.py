@@ -4,16 +4,16 @@ __all__ = ("FitsWriter",)
 
 
 import dataclasses
+import json
 from collections.abc import Iterator, Mapping, Sequence
 from contextlib import contextmanager
-from typing import Any, BinaryIO, NotRequired, TypedDict, cast
+from typing import Any, BinaryIO, TypedDict, cast
 
 import astropy.io.fits
 import astropy.units
 import pydantic
-import yaml
 
-from ._asdf import BlockWriter
+from . import asdf_utils
 from ._dtypes import BUILTIN_TYPES
 from ._field_info import (
     FieldInfo,
@@ -31,7 +31,7 @@ from ._geom import Point
 from ._image import Image, ImageReference
 from ._mask import Mask, MaskReference
 from ._struct import Struct
-from ._yaml import YamlValue
+from .json_utils import JsonValue
 
 FORMAT_VERSION = (0, 0, 1)
 
@@ -50,12 +50,6 @@ def handle_skips() -> Iterator[None]:
         yield
     except SkipNode:
         pass
-
-
-class SerializationContext(TypedDict):
-    yaml: bool
-    block_writer: NotRequired[BlockWriter]
-    addressed: NotRequired[AddressedTreeData]
 
 
 @dataclasses.dataclass
@@ -113,10 +107,10 @@ class FitsWriter:
         self.primary_hdu.header.set(
             "SHOEFITS", ".".join(str(v) for v in FORMAT_VERSION), "SHOEFITS format version."
         )
-        self.primary_hdu.header.set("TREEADDR", 0, "Address of YAML tree (bytes from file start).")
-        self.primary_hdu.header.set("TREESIZE", 0, "Size of YAML tree (bytes).")
+        self.primary_hdu.header.set("TREEADDR", 0, "Address of JSON tree (bytes from file start).")
+        self.primary_hdu.header.set("TREESIZE", 0, "Size of JSON tree (bytes).")
         self.hdu_list = astropy.io.fits.HDUList([self.primary_hdu])
-        self.block_writer: BlockWriter = BlockWriter()
+        self.block_writer = asdf_utils.BlockWriter()
         path = Path()
         if is_frame := isinstance(struct, Frame):
             path.reset()
@@ -141,18 +135,14 @@ class FitsWriter:
         tree_fits_header["BITPIX"] = 8
         tree_fits_header["NAXIS"] = 1
         tree_fits_header["NAXIS1"] = 0
-        tree_fits_header["EXTNAME"] = "ASDF"
+        tree_fits_header["EXTNAME"] = "JSONTREE"
         tree_fits_header.tofile(buffer)
         tree_data_address = buffer.tell()
-        buffer.writelines(
-            [
-                b"#ASDF 1.0.0\n",
-                b"%YAML 1.1\n",
-                b"%TAG ! tag:stsci.edu:asdf/\n",
-                b"--- !core/asdf-1.0.0\n",
-            ]
-        )
-        yaml.dump(self.tree, buffer, explicit_end=True, encoding="utf-8")
+        # json.dump needs to write to a text buffer, and we can't use
+        # io.TextIOWrapper(buffer) because that auto-closes the buffer it
+        # proxies.
+        tree_str = json.dumps(self.tree, ensure_ascii=False)
+        buffer.write(tree_str.encode("utf-8"))
         tree_size = buffer.tell() - tree_data_address
         self.block_writer.write(buffer)
         asdf_data_size = buffer.tell() - tree_data_address
@@ -174,7 +164,7 @@ class FitsWriter:
         field_info: FieldInfo,
         path: Path,
         header: astropy.io.fits.Header,
-    ) -> YamlValue:
+    ) -> JsonValue:
         match field_info:
             case ValueFieldInfo():
                 return self._walk_value(value, field_info, path, header)
@@ -203,7 +193,7 @@ class FitsWriter:
 
     def _walk_value(
         self, value: object, field_info: ValueFieldInfo, path: Path, header: astropy.io.fits.Header
-    ) -> YamlValue:
+    ) -> JsonValue:
         value = cast(int | str | float | None, BUILTIN_TYPES[field_info.dtype](value))
         if field_info.fits_header:
             if field_info.fits_header is True:
@@ -215,7 +205,7 @@ class FitsWriter:
 
     def _walk_image(
         self, image: Image, field_info: ImageFieldInfo, path: Path, header: astropy.io.fits.Header
-    ) -> YamlValue:
+    ) -> JsonValue:
         source: int | str
         if field_info.fits_image_extension:
             if field_info.fits_image_extension is True:
@@ -230,16 +220,17 @@ class FitsWriter:
             label.update_header(header)
             self._add_array_start_wcs(image.bbox.start, header)
             hdu = astropy.io.fits.ImageHDU(image.array, header=header)
+            result = ImageReference.from_image_and_source(image, label.asdf_source).model_dump()
             self.hdu_list.append(hdu)
-            source = label.asdf_source
+            self.hdu_addressed.append(cast(AddressedTreeData, result))
+            return result
         else:
             source = self.block_writer.add_array(image.array)
-        with self._serialization_context(fits=bool(field_info.fits_image_extension)) as context:
-            return ImageReference.from_image_and_source(image, source).model_dump(context=context)
+            return ImageReference.from_image_and_source(image, source).model_dump()
 
     def _walk_mask(
         self, mask: Mask, field_info: MaskFieldInfo, path: Path, header: astropy.io.fits.Header
-    ) -> YamlValue:
+    ) -> JsonValue:
         source: int | str
         if field_info.fits_image_extension:
             if field_info.fits_image_extension is True:
@@ -256,12 +247,13 @@ class FitsWriter:
                     if mask_plane is not None:
                         header.set(f"MP_{mask_plane.name.upper()}", mask_plane_index, mask_plane.description)
             hdu = astropy.io.fits.ImageHDU(mask.array, header=header)
+            result = MaskReference.from_mask_and_source(mask, label.asdf_source).model_dump()
             self.hdu_list.append(hdu)
-            source = label.asdf_source
+            self.hdu_addressed.append(cast(AddressedTreeData, result))
+            return result
         else:
             source = self.block_writer.add_array(mask.array)
-        with self._serialization_context(fits=bool(field_info.fits_image_extension)) as context:
-            return MaskReference.from_mask_and_source(mask, source).model_dump(context=context)
+            return MaskReference.from_mask_and_source(mask, source).model_dump()
 
     def _walk_struct(
         self,
@@ -269,10 +261,10 @@ class FitsWriter:
         path: Path,
         header: astropy.io.fits.Header,
         is_frame: bool,
-    ) -> YamlValue:
+    ) -> JsonValue:
         if is_frame:
             header = header.copy()
-        result_data: dict[str, YamlValue] = {}
+        result_data: dict[str, JsonValue] = {}
         for name, field_info in struct.struct_fields.items():
             with handle_skips():
                 result_data[name] = self._walk_dispatch(
@@ -286,8 +278,8 @@ class FitsWriter:
         field_info: MappingFieldInfo,
         path: Path,
         header: astropy.io.fits.Header,
-    ) -> YamlValue:
-        result: dict[str, YamlValue] = {}
+    ) -> JsonValue:
+        result: dict[str, JsonValue] = {}
         for name, value in mapping.items():
             with handle_skips():
                 result[name] = self._walk_dispatch(value, field_info.value, path.push(name), header)
@@ -299,8 +291,8 @@ class FitsWriter:
         field_info: SequenceFieldInfo,
         path: Path,
         header: astropy.io.fits.Header,
-    ) -> YamlValue:
-        result: list[YamlValue] = []
+    ) -> JsonValue:
+        result: list[JsonValue] = []
         for index, value in enumerate(sequence):
             with handle_skips():
                 result.append(self._walk_dispatch(value, field_info.value, path.push(index), header))
@@ -312,8 +304,8 @@ class FitsWriter:
         field_info: ModelFieldInfo,
         path: Path,
         header: astropy.io.fits.Header,
-    ) -> YamlValue:
-        context = {"yaml": True, "block_writer": self.block_writer}
+    ) -> JsonValue:
+        context = {"block_writer": self.block_writer}
         return model.model_dump(context=context)
 
     def _walk_header(
@@ -322,7 +314,7 @@ class FitsWriter:
         field_info: HeaderFieldInfo,
         path: Path,
         header: astropy.io.fits.Header,
-    ) -> YamlValue:
+    ) -> JsonValue:
         header.update(value)
         raise SkipNode()
 
@@ -335,15 +327,3 @@ class FitsWriter:
         header.set(f"CRVAL2{wcs_name}", start.y, "Row pixel of Reference Pixel")
         header.set(f"CUNIT1{wcs_name}", "PIXEL", "Column unit")
         header.set(f"CUNIT2{wcs_name}", "PIXEL", "Row unit")
-
-    @contextmanager
-    def _serialization_context(self, fits: bool) -> Iterator[dict[str, Any]]:
-        context: SerializationContext = {"yaml": True}
-        if not fits:
-            context["block_writer"] = self.block_writer
-        # Cast is necessary because dict is mutable and hence its value type
-        # is invariant, not covariant.
-        yield cast(dict[str, Any], context)
-        if (addressed := context.pop("addressed", None)) is not None:
-            if fits:
-                self.hdu_addressed.append(addressed)
