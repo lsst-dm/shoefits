@@ -1,6 +1,13 @@
 from __future__ import annotations
 
-__all__ = ("YamlModel", "RestrictedYamlLoader", "DeferredYaml", "YamlValue", "yaml_represent_mapping")
+__all__ = (
+    "YamlModel",
+    "RestrictedYamlLoader",
+    "DeferredYaml",
+    "YamlValue",
+    "yaml_represent_mapping",
+    "yaml_represent_str",
+)
 
 from collections.abc import Callable
 from typing import Any, ClassVar, TypeAlias, Union, cast
@@ -66,3 +73,7 @@ YamlValue: TypeAlias = Union[int, str, float, DeferredYaml, None, list["YamlValu
 
 def yaml_represent_mapping(dumper: yaml.Dumper, data: dict[str, YamlValue], tag: str) -> yaml.MappingNode:
     return dumper.represent_mapping(tag, data)
+
+
+def yaml_represent_str(dumper: yaml.Dumper, data: str, tag: str) -> yaml.ScalarNode:
+    return dumper.represent_scalar(tag, data)

@@ -53,11 +53,11 @@ class Field(Generic[_T]):
     def __init__(self, **kwargs: Any):
         self._kwargs = kwargs
 
-    def __get__(self, frame: Struct, struct_type: type[Struct] | None = None) -> _T:
-        return frame._struct_data[self._name]
+    def __get__(self, struct: Struct, struct_type: type[Struct] | None = None) -> _T:
+        return struct._struct_data[self._name]
 
-    def __set__(self, frame: Struct, value: _T) -> None:
-        frame._struct_data[self._name] = value
+    def __set__(self, struct: Struct, value: _T) -> None:
+        struct._struct_data[self._name] = value
 
     def __set_name__(self, owner: Struct, name: str) -> None:
         self._name = name

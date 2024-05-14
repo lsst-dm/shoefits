@@ -7,7 +7,6 @@ __all__ = (
     "FloatType",
     "NumberType",
     "ValueType",
-    "Unit",
     "NUMPY_TYPES",
     "BUILTIN_TYPES",
     "str_to_numpy",
@@ -60,8 +59,6 @@ NUMPY_TYPES["bytes"] = np.bytes_
 BUILTIN_TYPES: dict[str, type] = {k: getattr(builtins, k) for k in ["bool", "str", "bytes"]}
 BUILTIN_TYPES.update(dict.fromkeys(get_args(IntegerType), int))
 BUILTIN_TYPES.update(dict.fromkeys(get_args(FloatType), float))
-
-Unit: TypeAlias = str
 
 
 def str_to_numpy(s: ValueType) -> type:

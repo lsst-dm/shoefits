@@ -1,15 +1,15 @@
 from __future__ import annotations
 
-__all__ = ()
+__all__ = ("FitsWriter",)
 
 
 import dataclasses
 from collections.abc import Iterator, Mapping, Sequence
 from contextlib import contextmanager
-from io import BytesIO
-from typing import Any, NotRequired, TypedDict, cast
+from typing import Any, BinaryIO, NotRequired, TypedDict, cast
 
 import astropy.io.fits
+import astropy.units
 import pydantic
 import yaml
 
@@ -32,6 +32,8 @@ from ._image import Image, ImageReference
 from ._mask import Mask, MaskReference
 from ._struct import Struct
 from ._yaml import YamlValue
+
+FORMAT_VERSION = (0, 0, 1)
 
 
 class AddressedTreeData(TypedDict, total=False):
@@ -108,9 +110,11 @@ class Path:
 class FitsWriter:
     def __init__(self, struct: Struct):
         self.primary_hdu = astropy.io.fits.PrimaryHDU()
-        self.primary_hdu.header.set("SHOEFITS", "0.0.1", "SHOEFITS format version.")
-        self.primary_hdu.header.set("TREEADDR", 0, "Address of the YAML tree (bytes from file start).")
-        self.primary_hdu.header.set("TREESIZE", 0, "Size of the YAML tree (bytes).")
+        self.primary_hdu.header.set(
+            "SHOEFITS", ".".join(str(v) for v in FORMAT_VERSION), "SHOEFITS format version."
+        )
+        self.primary_hdu.header.set("TREEADDR", 0, "Address of YAML tree (bytes from file start).")
+        self.primary_hdu.header.set("TREESIZE", 0, "Size of YAML tree (bytes).")
         self.hdu_list = astropy.io.fits.HDUList([self.primary_hdu])
         self.block_writer: BlockWriter = BlockWriter()
         path = Path()
@@ -121,11 +125,16 @@ class FitsWriter:
         self.tree = self._walk_struct(struct, path, header=primary_header, is_frame=is_frame)
         self.primary_hdu.header.update(primary_header)
 
-    def write(self, buffer: BytesIO) -> None:
+    def write(self, buffer: BinaryIO) -> None:
         buffer_address = buffer.tell()
+        address = buffer_address
         self.hdu_list.writeto(buffer, overwrite=True, checksum=True)
         for hdu, addressed in zip(self.hdu_list, self.hdu_addressed):
-            addressed["address"] = hdu.fileinfo()["hdrLoc"]
+            # hdu.fileinfo() doesn't seem to work (at least on some file-like
+            # objects) and there's no method to get the size of the header
+            # without stringifying it, so that's what we do.
+            addressed["address"] = address + len(hdu.header.tostring())
+            address += hdu.filebytes()
         tree_header_address = buffer.tell()
         tree_fits_header = astropy.io.fits.Header()
         tree_fits_header["XTENSION"] = "IMAGE"
@@ -143,10 +152,12 @@ class FitsWriter:
                 b"--- !core/asdf-1.0.0\n",
             ]
         )
-        yaml.dump(self.tree, buffer, explicit_end=True)
+        yaml.dump(self.tree, buffer, explicit_end=True, encoding="utf-8")
         tree_size = buffer.tell() - tree_data_address
         self.block_writer.write(buffer)
         asdf_data_size = buffer.tell() - tree_data_address
+        padding = 2880 - remainder if (remainder := asdf_data_size % 2880) else 0
+        buffer.write(b"\0" * padding)
         # Rewrite the ASDF extension's NAXIS to reflect the tree + blocks size.
         buffer.seek(tree_header_address)
         tree_fits_header.set("NAXIS1", asdf_data_size)
@@ -214,6 +225,8 @@ class FitsWriter:
                     extname=field_info.fits_image_extension, extver=None, extlevel=path.extlevel
                 )
             header = header.copy()
+            if image.unit is not None:
+                header["BUNIT"] = image.unit.to_string(format="fits")
             label.update_header(header)
             self._add_array_start_wcs(image.bbox.start, header)
             hdu = astropy.io.fits.ImageHDU(image.array, header=header)

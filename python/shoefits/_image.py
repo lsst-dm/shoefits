@@ -9,8 +9,8 @@ import numpy.typing as npt
 import pydantic
 import pydantic_core.core_schema as pcs
 
-from ._asdf import BlockWriter, NdArray, Quantity
-from ._dtypes import NumberType, Unit, numpy_to_str
+from ._asdf import BlockWriter, NdArray, Quantity, Unit
+from ._dtypes import NumberType, numpy_to_str
 from ._geom import Box, Point
 from ._yaml import YamlModel
 

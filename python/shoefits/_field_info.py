@@ -12,27 +12,25 @@ __all__ = (
 )
 
 from collections.abc import Mapping, Sequence
-from typing import TYPE_CHECKING, Any, Literal, TypeAlias, TypeVar, Union, cast, final, get_args, get_origin
+from typing import TYPE_CHECKING, Any, Literal, TypeAlias, Union, cast, final, get_args, get_origin
 
 import astropy.io.fits
 import pydantic
 
+from ._asdf import Unit
 from ._dtypes import (
     BUILTIN_TYPES,
     NUMPY_TYPES,
     NumberType,
-    Unit,
     UnsignedIntegerType,
     ValueType,
     numpy_to_str,
 )
-from ._frame import Frame
-from ._image import Image
-from ._mask import Mask, MaskPlane
-
-_T = TypeVar("_T")
 
 if TYPE_CHECKING:
+    from ._frame import Frame
+    from ._image import Image
+    from ._mask import Mask, MaskPlane
     from ._struct import Struct
 
 
@@ -210,6 +208,10 @@ FieldInfo: TypeAlias = Union[
 def _build_field_info(
     struct_type: type[Struct], name: str, annotation: Any, kwargs: dict[str, Any]
 ) -> FieldInfo:
+    from ._image import Image
+    from ._mask import Mask
+    from ._struct import Struct
+
     if isinstance(annotation, type):
         if annotation is Image:
             return ImageFieldInfo.build(name, struct_type, annotation, **kwargs)

@@ -1,9 +1,10 @@
 from __future__ import annotations
 
-__all__ = ("Point", "Extent", "Interval", "Box")
+__all__ = ("Point", "Extent", "Interval", "Box", "bounds")
 
-from typing import Any, ClassVar, final, overload
+from typing import Any, ClassVar, cast, final, overload
 
+import numpy as np
 import pydantic
 
 
@@ -22,12 +23,10 @@ class Point(BaseGeometry):
         return Point(x=self.x + other.x, y=self.y + other.y)
 
     @overload
-    def __sub__(self, other: Point) -> Extent:
-        ...
+    def __sub__(self, other: Point) -> Extent: ...
 
     @overload
-    def __sub__(self, other: Extent) -> Point:
-        ...
+    def __sub__(self, other: Extent) -> Point: ...
 
     def __sub__(self, other: Point | Extent) -> Any:
         cls = Point if type(other) is Extent else Extent
@@ -77,6 +76,14 @@ class Interval(BaseGeometry):
     @property
     def size(self) -> int:
         return self.stop - self.start
+
+    @property
+    def range(self) -> range:
+        return range(self.start, self.stop)
+
+    @property
+    def arange(self) -> np.ndarray:
+        return np.arange(self.start, self.stop)
 
     def __str__(self) -> str:
         return f"{self.start}:{self.stop}"
@@ -139,6 +146,10 @@ class Box(BaseGeometry):
     def size(self) -> Extent:
         return Extent(x=self.x.size, y=self.y.size)
 
+    @property
+    def meshgrid(self) -> tuple[np.ndarray, np.ndarray]:
+        return cast(tuple[np.ndarray, np.ndarray], tuple(np.meshgrid(self.x.arange, self.y.arange)))
+
     @classmethod
     def hull(cls, *args: Point | Box) -> Box | None:
         if not args:
@@ -159,3 +170,16 @@ class Box(BaseGeometry):
 
     def __sub__(self, other: Extent) -> Box:
         return Box(x=self.x - other.x, y=self.y - other.y)
+
+
+class BoundsFactory:
+    def __getitem__(self, key: slice | tuple[slice, slice]) -> Interval | Box:
+        match key:
+            case slice(start=start, stop=stop):
+                return Interval(start=start, stop=stop)
+            case (slice(start=y_start, stop=y_stop), slice(start=x_start, stop=x_stop)):
+                return Box(x=Interval(start=x_start, stop=x_stop), y=Interval(start=y_start, stop=y_stop))
+        raise TypeError("Unsupported slice for bounds factory.")
+
+
+bounds = BoundsFactory()
