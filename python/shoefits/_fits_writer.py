@@ -5,12 +5,15 @@ __all__ = ("FitsWriter",)
 
 import dataclasses
 import json
+import warnings
 from collections.abc import Iterator, Mapping, Sequence
 from contextlib import contextmanager
+from io import BytesIO, TextIOWrapper
 from typing import Any, BinaryIO, TypedDict, cast
 
 import astropy.io.fits
 import astropy.units
+import numpy as np
 import pydantic
 
 from . import asdf_utils
@@ -72,6 +75,14 @@ class FitsExtensionLabel:
         header["EXTLEVEL"] = self.extlevel
 
 
+@dataclasses.dataclass
+class FitsExtensionWriter:
+    parent_header: astropy.io.fits.Header
+    extension_only_header: astropy.io.fits.Header
+    hdu: astropy.io.fits.ImageHDU
+    addressed: AddressedTreeData
+
+
 @dataclasses.dataclass(frozen=True)
 class Path:
     to_frame: tuple[str | int, ...] = ()
@@ -109,54 +120,51 @@ class FitsWriter:
         )
         self.primary_hdu.header.set("TREEADDR", 0, "Address of JSON tree (bytes from file start).")
         self.primary_hdu.header.set("TREESIZE", 0, "Size of JSON tree (bytes).")
-        self.hdu_list = astropy.io.fits.HDUList([self.primary_hdu])
+        self.extension_writers: list[FitsExtensionWriter] = []
         self.block_writer = asdf_utils.BlockWriter()
         path = Path()
         if is_frame := isinstance(struct, Frame):
             path.reset()
         primary_header = astropy.io.fits.Header()
         self.hdu_addressed: list[AddressedTreeData] = [{}]
-        self.tree = self._walk_struct(struct, path, header=primary_header, is_frame=is_frame)
+        # Squash astropy warnings about needing HIERARCH, since the only way to
+        # get it do HIERARCH only when needed is to let it warn.
+        with warnings.catch_warnings(category=astropy.io.fits.verify.VerifyWarning, action="ignore"):
+            self.tree = self._walk_struct(struct, path, header=primary_header, is_frame=is_frame)
         self.primary_hdu.header.update(primary_header)
 
     def write(self, buffer: BinaryIO) -> None:
-        buffer_address = buffer.tell()
-        address = buffer_address
-        self.hdu_list.writeto(buffer, overwrite=True, checksum=True)
-        for hdu, addressed in zip(self.hdu_list, self.hdu_addressed):
-            # hdu.fileinfo() doesn't seem to work (at least on some file-like
-            # objects) and there's no method to get the size of the header
-            # without stringifying it, so that's what we do.
-            addressed["address"] = address + len(hdu.header.tostring())
-            address += hdu.filebytes()
-        tree_header_address = buffer.tell()
+        address = 0
+        hdu_list = astropy.io.fits.HDUList([self.primary_hdu])
+        # There's no method to get the size of the header without stringifying
+        # it, so that's what we do (here and later).  The primary header isn't
+        # actually complete - we need to fill in the TREEADDR and TREESIZE
+        # headers once we have finalized the tree.  But that shouldn't affect
+        # the header size, because we've already put those cards in with
+        # padding zeros.
+        address += len(self.primary_hdu.header.tostring())
+        for writer in self.extension_writers:
+            writer.hdu.header.update(writer.parent_header)
+            writer.hdu.header.update(writer.extension_only_header)
+            writer.addressed["address"] = address + len(writer.hdu.header.tostring())
+            address += writer.hdu.filebytes()
+            hdu_list.append(writer.hdu)
         tree_fits_header = astropy.io.fits.Header()
         tree_fits_header["XTENSION"] = "IMAGE"
         tree_fits_header["BITPIX"] = 8
         tree_fits_header["NAXIS"] = 1
         tree_fits_header["NAXIS1"] = 0
         tree_fits_header["EXTNAME"] = "JSONTREE"
-        tree_fits_header.tofile(buffer)
-        tree_data_address = buffer.tell()
-        # json.dump needs to write to a text buffer, and we can't use
-        # io.TextIOWrapper(buffer) because that auto-closes the buffer it
-        # proxies.
-        tree_str = json.dumps(self.tree, ensure_ascii=False)
-        buffer.write(tree_str.encode("utf-8"))
-        tree_size = buffer.tell() - tree_data_address
-        self.block_writer.write(buffer)
-        asdf_data_size = buffer.tell() - tree_data_address
-        padding = 2880 - remainder if (remainder := asdf_data_size % 2880) else 0
-        buffer.write(b"\0" * padding)
-        # Rewrite the ASDF extension's NAXIS to reflect the tree + blocks size.
-        buffer.seek(tree_header_address)
-        tree_fits_header.set("NAXIS1", asdf_data_size)
-        tree_fits_header.tofile(buffer)
-        # Rewrite the primary FITS header with the tree's address and size.
-        buffer.seek(buffer_address)
-        self.primary_hdu.header["TREEADDR"] = tree_data_address - buffer_address
+        self.primary_hdu.header["TREEADDR"] = address + len(tree_fits_header.tostring())
+        asdf_buffer = BytesIO()
+        tree_buffer = TextIOWrapper(asdf_buffer, write_through=True)
+        json.dump(self.tree, tree_buffer, ensure_ascii=False)
+        tree_size = asdf_buffer.tell()
         self.primary_hdu.header["TREESIZE"] = tree_size
-        self.primary_hdu.header.tofile(buffer)
+        self.block_writer.write(asdf_buffer)
+        asdf_array = np.frombuffer(asdf_buffer.getbuffer(), dtype=np.uint8)
+        hdu_list.append(astropy.io.fits.ImageHDU(asdf_array, header=tree_fits_header))
+        hdu_list.writeto(buffer)  # TODO: make space for, then add checksums
 
     def _walk_dispatch(
         self,
@@ -214,15 +222,21 @@ class FitsWriter:
                 label = FitsExtensionLabel(
                     extname=field_info.fits_image_extension, extver=None, extlevel=path.extlevel
                 )
-            header = header.copy()
+            extension_only_header = astropy.io.fits.Header()
             if image.unit is not None:
-                header["BUNIT"] = image.unit.to_string(format="fits")
-            label.update_header(header)
-            self._add_array_start_wcs(image.bbox.start, header)
-            hdu = astropy.io.fits.ImageHDU(image.array, header=header)
+                extension_only_header["BUNIT"] = image.unit.to_string(format="fits")
+            label.update_header(extension_only_header)
+            self._add_array_start_wcs(image.bbox.start, extension_only_header)
             result = ImageReference.from_image_and_source(image, label.asdf_source).model_dump()
-            self.hdu_list.append(hdu)
-            self.hdu_addressed.append(cast(AddressedTreeData, result))
+            hdu = astropy.io.fits.ImageHDU(image.array)
+            self.extension_writers.append(
+                FitsExtensionWriter(
+                    hdu=hdu,
+                    parent_header=header,
+                    extension_only_header=extension_only_header,
+                    addressed=cast(AddressedTreeData, result),
+                )
+            )
             return result
         else:
             source = self.block_writer.add_array(image.array)
@@ -239,17 +253,25 @@ class FitsWriter:
                 label = FitsExtensionLabel(
                     extname=field_info.fits_image_extension, extver=None, extlevel=path.extlevel
                 )
-            header = header.copy()
-            label.update_header(header)
-            self._add_array_start_wcs(mask.bbox.start, header)
+            extension_only_header = astropy.io.fits.Header()
+            label.update_header(extension_only_header)
+            self._add_array_start_wcs(mask.bbox.start, extension_only_header)
             if field_info.fits_plane_header_style == "afw":
                 for mask_plane_index, mask_plane in enumerate(mask.schema):
                     if mask_plane is not None:
-                        header.set(f"MP_{mask_plane.name.upper()}", mask_plane_index, mask_plane.description)
-            hdu = astropy.io.fits.ImageHDU(mask.array, header=header)
+                        extension_only_header.set(
+                            f"MP_{mask_plane.name.upper()}", mask_plane_index, mask_plane.description
+                        )
+            hdu = astropy.io.fits.ImageHDU(mask.array)
             result = MaskReference.from_mask_and_source(mask, label.asdf_source).model_dump()
-            self.hdu_list.append(hdu)
-            self.hdu_addressed.append(cast(AddressedTreeData, result))
+            self.extension_writers.append(
+                FitsExtensionWriter(
+                    hdu=hdu,
+                    parent_header=header,
+                    extension_only_header=extension_only_header,
+                    addressed=cast(AddressedTreeData, result),
+                )
+            )
             return result
         else:
             source = self.block_writer.add_array(mask.array)

@@ -14,6 +14,7 @@ import pydantic_core.core_schema as pcs
 
 from . import asdf_utils
 from ._dtypes import UnsignedIntegerType, numpy_to_str
+from ._field_info import MaskFieldInfo
 from ._geom import Box, Point
 
 
@@ -21,6 +22,9 @@ from ._geom import Box, Point
 class MaskPlane:
     name: str
     description: str
+
+
+MaskFieldInfo.model_rebuild()
 
 
 @dataclasses.dataclass(frozen=True)
@@ -39,7 +43,7 @@ class MaskSchema:
         self._planes = tuple(planes)
         self._dtype = np.dtype(dtype)
         self._descriptions = {plane.name: plane.description for plane in self._planes if plane is not None}
-        stride = self._dtype.itemsize
+        stride = self._dtype.itemsize * 8
         self._mask_size = math.ceil(len(self._planes) / stride)
         self._bits: dict[str, MaskPlaneBit] = {
             plane.name: MaskPlaneBit.compute(n, stride)
@@ -52,6 +56,9 @@ class MaskSchema:
 
     def __len__(self) -> int:
         return len(self._planes)
+
+    def __getitem__(self, i: int) -> MaskPlane | None:
+        return self._planes[i]
 
     @property
     def dtype(self) -> np.dtype:
@@ -68,8 +75,8 @@ class MaskSchema:
     def bitmask(self, *planes: str) -> np.ndarray:
         result = np.zeros(self.mask_size, dtype=self._dtype)
         for plane in planes:
-            mask = self._bits[plane]
-            result[mask.index] |= mask
+            bit = self._bits[plane]
+            result[bit.index] |= bit.mask
         return result
 
 
@@ -81,7 +88,7 @@ class Mask:
 
     @classmethod
     def from_zeros(cls, dtype: npt.DTypeLike, bbox: Box, schema: MaskSchema) -> Mask:
-        return cls(np.zeros(bbox.size.shape, dtype=dtype), bbox, schema)
+        return cls(np.zeros(bbox.size.shape + (schema.mask_size,), dtype=dtype), bbox, schema)
 
     @property
     def array(self) -> np.ndarray:

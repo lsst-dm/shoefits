@@ -18,20 +18,19 @@ import astropy.io.fits
 import pydantic
 
 from . import asdf_utils
-from ._dtypes import (
-    BUILTIN_TYPES,
-    NUMPY_TYPES,
-    NumberType,
-    UnsignedIntegerType,
-    ValueType,
-    numpy_to_str,
-)
+from ._dtypes import BUILTIN_TYPES, NUMPY_TYPES, NumberType, UnsignedIntegerType, ValueType, numpy_to_str
+from ._geom import Extent
 
 if TYPE_CHECKING:
     from ._frame import Frame
     from ._image import Image
     from ._mask import Mask, MaskPlane
     from ._struct import Struct
+
+
+class FitsCompression(pydantic.BaseModel):
+    algorithm: Literal["gzip", "gzip_shuffle"]
+    tile_size: Extent
 
 
 class FieldInfoBase(pydantic.BaseModel):
@@ -86,11 +85,12 @@ class ImageFieldInfo(FieldInfoBase):
 
 @final
 class MaskFieldInfo(FieldInfoBase):
-    dtype: UnsignedIntegerType
+    dtype: UnsignedIntegerType = "uint8"
     required_planes: list[MaskPlane] = pydantic.Field(default_factory=list)
     allow_additional_planes: bool = True
     fits_image_extension: bool | str = True
     fits_plane_header_style: Literal["afw"] | None = "afw"
+    fits_compression: FitsCompression | None = None
 
     @classmethod
     def build(
