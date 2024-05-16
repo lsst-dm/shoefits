@@ -9,6 +9,7 @@ __all__ = (
     "SequenceFieldInfo",
     "ModelFieldInfo",
     "HeaderFieldInfo",
+    "FieldInfo",
 )
 
 from collections.abc import Mapping, Sequence
@@ -18,19 +19,14 @@ import astropy.io.fits
 import pydantic
 
 from . import asdf_utils
+from ._compression import FitsCompression
 from ._dtypes import BUILTIN_TYPES, NUMPY_TYPES, NumberType, UnsignedIntegerType, ValueType, numpy_to_str
-from ._geom import Extent
 
 if TYPE_CHECKING:
     from ._frame import Frame
     from ._image import Image
     from ._mask import Mask, MaskPlane
     from ._struct import Struct
-
-
-class FitsCompression(pydantic.BaseModel):
-    algorithm: Literal["gzip", "gzip_shuffle"]
-    tile_size: Extent
 
 
 class FieldInfoBase(pydantic.BaseModel):

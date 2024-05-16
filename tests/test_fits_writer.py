@@ -68,7 +68,7 @@ def test_image_fits_write() -> None:
     array = np.frombuffer(
         buffer_bytes[image_address : image_address + s.image.array.size * 2],
         dtype=np.dtype(np.int16).newbyteorder(">"),
-    ).reshape(2, 4)
+    ).reshape(*s.image.array.shape)
     np.testing.assert_array_equal(array, s.image.array)
     # Check that the image HDU has the right data and header.
     assert hdu_list[1].header["EXTNAME"] == "image"
@@ -97,12 +97,12 @@ def test_compressed_mask_fits_write() -> None:
     class S(shf.Struct):
         def __init__(self) -> None:
             super().__init__()
-            self.mask = shf.Mask.from_zeros(np.uint8, shf.bounds[1:3, 2:6], mask_schema)
+            self.mask = shf.Mask.from_zeros(np.uint8, shf.bounds[1:5, -2:6], mask_schema)
             self.mask.array[0, 0, :] = mask_schema.bitmask("bad", "interpolated")
             self.mask.array[0, 2, :] = mask_schema.bitmask("saturated")
             self.mask.array[1, 3, :] = mask_schema.bitmask("interpolated", "fill5")
 
-        mask: shf.Mask = shf.Field()
+        mask: shf.Mask = shf.Field(fits_compression=None)
 
     s = S()
     writer = shf.FitsWriter(s)
@@ -130,11 +130,11 @@ def test_compressed_mask_fits_write() -> None:
         case {
             "data": {
                 "source": "fits:mask",
-                "shape": [2, 4, 2],
+                "shape": [4, 8, 2],
                 "datatype": "uint8",
                 "byteorder": "big",
             },
-            "start": {"x": 2, "y": 1},
+            "start": {"x": -2, "y": 1},
             "address": int(image_address),
             "planes": planes_list,
         }:
@@ -148,12 +148,12 @@ def test_compressed_mask_fits_write() -> None:
     array = np.frombuffer(
         buffer_bytes[image_address : image_address + s.mask.array.size],
         dtype=np.dtype(np.uint8).newbyteorder(">"),
-    ).reshape(2, 4, 2)
+    ).reshape(*s.mask.array.shape)
     np.testing.assert_array_equal(array, s.mask.array)
     # Check that the image HDU has the right data and header.
     assert hdu_list[1].header["EXTNAME"] == "mask"
     assert hdu_list[1].header["EXTLEVEL"] == 1
-    assert hdu_list[1].header["CRVAL1A"] == 2
+    assert hdu_list[1].header["CRVAL1A"] == -2
     assert hdu_list[1].header["CRVAL2A"] == 1
     assert hdu_list[1].header["MP_BAD"] == 0
     assert hdu_list[1].header["MP_INTERPOLATED"] == 2

@@ -17,6 +17,7 @@ import numpy as np
 import pydantic
 
 from . import asdf_utils
+from ._compression import FitsCompression
 from ._dtypes import BUILTIN_TYPES
 from ._field_info import (
     FieldInfo,
@@ -79,8 +80,9 @@ class FitsExtensionLabel:
 class FitsExtensionWriter:
     parent_header: astropy.io.fits.Header
     extension_only_header: astropy.io.fits.Header
-    hdu: astropy.io.fits.ImageHDU
+    array: np.ndarray
     addressed: AddressedTreeData
+    compression: FitsCompression | None = None
 
 
 @dataclasses.dataclass(frozen=True)
@@ -144,11 +146,25 @@ class FitsWriter:
         # padding zeros.
         address += len(self.primary_hdu.header.tostring())
         for writer in self.extension_writers:
-            writer.hdu.header.update(writer.parent_header)
-            writer.hdu.header.update(writer.extension_only_header)
-            writer.addressed["address"] = address + len(writer.hdu.header.tostring())
-            address += writer.hdu.filebytes()
-            hdu_list.append(writer.hdu)
+            full_header = writer.parent_header.copy()
+            full_header.update(writer.extension_only_header)
+            if writer.compression is not None:
+                tile_shape = writer.compression.tile_size.shape + writer.array.shape[2:]
+                hdu = astropy.io.fits.CompImageHDU(
+                    writer.array,
+                    header=full_header,
+                    compression_type=writer.compression.algorithm.value,
+                    tile_shape=tile_shape,
+                )
+                raise NotImplementedError(
+                    "TODO: this triggers some internal error in astropy when we try "
+                    "to write the HDUList later.  Not sure what's unusual here."
+                )
+            else:
+                hdu = astropy.io.fits.ImageHDU(writer.array, full_header)
+            writer.addressed["address"] = address + len(hdu.header.tostring())
+            address += hdu.filebytes()
+            hdu_list.append(hdu)
         tree_fits_header = astropy.io.fits.Header()
         tree_fits_header["XTENSION"] = "IMAGE"
         tree_fits_header["BITPIX"] = 8
@@ -228,10 +244,9 @@ class FitsWriter:
             label.update_header(extension_only_header)
             self._add_array_start_wcs(image.bbox.start, extension_only_header)
             result = ImageReference.from_image_and_source(image, label.asdf_source).model_dump()
-            hdu = astropy.io.fits.ImageHDU(image.array)
             self.extension_writers.append(
                 FitsExtensionWriter(
-                    hdu=hdu,
+                    array=image.array,
                     parent_header=header,
                     extension_only_header=extension_only_header,
                     addressed=cast(AddressedTreeData, result),
@@ -262,14 +277,14 @@ class FitsWriter:
                         extension_only_header.set(
                             f"MP_{mask_plane.name.upper()}", mask_plane_index, mask_plane.description
                         )
-            hdu = astropy.io.fits.ImageHDU(mask.array)
             result = MaskReference.from_mask_and_source(mask, label.asdf_source).model_dump()
             self.extension_writers.append(
                 FitsExtensionWriter(
-                    hdu=hdu,
+                    array=mask.array,
                     parent_header=header,
                     extension_only_header=extension_only_header,
                     addressed=cast(AddressedTreeData, result),
+                    compression=field_info.fits_compression,
                 )
             )
             return result
