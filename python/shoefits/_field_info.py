@@ -12,6 +12,7 @@ __all__ = (
     "FieldInfo",
 )
 
+import types
 from collections.abc import Mapping, Sequence
 from typing import TYPE_CHECKING, Any, Literal, TypeAlias, Union, cast, final, get_args, get_origin
 
@@ -23,7 +24,6 @@ from ._compression import FitsCompression
 from ._dtypes import NumberType, UnsignedIntegerType, ValueType, numpy_to_str
 
 if TYPE_CHECKING:
-    from ._frame import Frame
     from ._image import Image
     from ._mask import Mask, MaskPlane
     from ._struct import Struct
@@ -31,6 +31,7 @@ if TYPE_CHECKING:
 
 class FieldInfoBase(pydantic.BaseModel):
     description: str = ""
+    allow_none: bool = False
 
 
 @final
@@ -101,6 +102,8 @@ class StructFieldInfo(FieldInfoBase):
     def build(
         cls, name: str, struct_type: type[Struct], annotation: type[Struct], **kwargs: Any
     ) -> StructFieldInfo:
+        from ._frame import Frame
+
         if not issubclass(kwargs.setdefault("cls", annotation), annotation):
             raise TypeError(
                 f"Annotation {annotation.__name__} for frame field {struct_type.__name__}.{name} is not "
@@ -194,13 +197,22 @@ FieldInfo: TypeAlias = Union[
 
 
 def _build_field_info(
-    struct_type: type[Struct], name: str, annotation: Any, kwargs: dict[str, Any]
+    struct_type: type[Struct],
+    name: str,
+    annotation: Any,
+    kwargs: dict[str, Any],
+    annotation_had_none_stripped: bool = False,
 ) -> FieldInfo:
     from ._image import Image
     from ._mask import Mask
     from ._struct import Struct
 
     if isinstance(annotation, type):
+        if kwargs.get("allow_none", False) and not annotation_had_none_stripped:
+            raise TypeError(
+                "Annotation does not permit None, but allow_none=True was set explicitly "
+                f"on field {struct_type.__name__}.{name}."
+            )
         if annotation is Image:
             return ImageFieldInfo.build(name, struct_type, annotation, **kwargs)
         if annotation is Mask:
@@ -223,4 +235,15 @@ def _build_field_info(
         return SequenceFieldInfo.build(
             name, struct_type, cast(type[Sequence[Any]], origin_type), annotation, **kwargs
         )
+    if origin_type is types.UnionType:
+        match get_args(annotation):
+            case (optional_type, types.NoneType) | (types.NoneType, optional_type):
+                if not kwargs.setdefault("allow_none", True):
+                    raise TypeError(
+                        "Annotation permits None, but allow_none=False was set explicitly "
+                        f"on field {struct_type.__name__}.{name}."
+                    )
+                return _build_field_info(
+                    struct_type, name, optional_type, kwargs, annotation_had_none_stripped=True
+                )
     raise TypeError(f"Unsupported type {annotation} for field {struct_type.__name__}.{name}.")

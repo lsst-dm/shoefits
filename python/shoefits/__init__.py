@@ -18,6 +18,7 @@ __all__ = (
     "MaskFieldInfo",
     "MaskPlane",
     "MaskSchema",
+    "ModelFieldInfo",
     "Point",
     "SequenceFieldInfo",
     "Struct",
@@ -32,6 +33,7 @@ from ._field_info import (
     ImageFieldInfo,
     MappingFieldInfo,
     MaskFieldInfo,
+    ModelFieldInfo,
     SequenceFieldInfo,
     StructFieldInfo,
     ValueFieldInfo,
@@ -42,3 +44,12 @@ from ._geom import Box, Extent, Interval, Point, bounds
 from ._image import Image
 from ._mask import Mask, MaskPlane, MaskSchema
 from ._struct import Field, Struct
+
+ValueFieldInfo.model_rebuild()
+ImageFieldInfo.model_rebuild()
+MaskFieldInfo.model_rebuild()
+MappingFieldInfo.model_rebuild()
+SequenceFieldInfo.model_rebuild()
+ModelFieldInfo.model_rebuild()
+HeaderFieldInfo.model_rebuild()
+StructFieldInfo.model_rebuild()
