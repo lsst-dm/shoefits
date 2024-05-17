@@ -23,16 +23,14 @@ class Point(BaseGeometry):
         return Point(x=self.x + other.x, y=self.y + other.y)
 
     @overload
-    def __sub__(self, other: Point) -> Extent:
-        ...
+    def __sub__(self, other: Point) -> Extent: ...
 
     @overload
-    def __sub__(self, other: Extent) -> Point:
-        ...
+    def __sub__(self, other: Extent) -> Point: ...
 
     def __sub__(self, other: Point | Extent) -> Any:
-        cls = Point if type(other) is Extent else Extent
-        return cls(x=self.x - other.x, y=self.y - other.y)
+        result_type = Point if type(other) is Extent else Extent
+        return result_type(x=self.x - other.x, y=self.y - other.y)
 
     def as_extent(self) -> Extent:
         return Extent(x=self.x, y=self.y)
@@ -43,10 +41,14 @@ Point.zero = Point(x=0, y=0)
 
 @final
 class Extent(BaseGeometry):
-    x: int
-    y: int
+    x: int = 0
+    y: int = 0
 
     zero: ClassVar[Extent]
+
+    @classmethod
+    def from_shape(cls, shape: tuple[int, int]) -> Extent:
+        return cls(x=shape[1], y=shape[0])
 
     @property
     def shape(self) -> tuple[int, int]:

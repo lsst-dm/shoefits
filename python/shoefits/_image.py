@@ -2,7 +2,7 @@ from __future__ import annotations
 
 __all__ = ("Image", "ImageReference")
 
-from typing import Any, Self
+from typing import Any, Self, cast
 
 import astropy.units
 import numpy as np
@@ -12,18 +12,44 @@ import pydantic_core.core_schema as pcs
 
 from . import asdf_utils
 from ._dtypes import NumberType, numpy_to_str
-from ._geom import Box, Point
+from ._geom import Box, Extent, Point
 
 
 class Image:
-    def __init__(self, array: np.ndarray, bbox: Box, unit: astropy.units.Unit | None = None):
+    def __init__(
+        self,
+        array_or_fill: np.ndarray | int | float = 0,
+        /,
+        *,
+        bbox: Box | None = None,
+        start: Point = Point(x=0, y=0),
+        size: Extent | None = None,
+        unit: astropy.units.Unit | None = None,
+        dtype: npt.DTypeLike | None = None,
+    ):
+        if isinstance(array_or_fill, np.ndarray):
+            if dtype is not None:
+                array = np.array(array_or_fill, dtype=dtype)
+            else:
+                array = array_or_fill
+            if bbox is None:
+                bbox = Box.from_size(Extent.from_shape(cast(tuple[int, int], array.shape)), start=start)
+            elif bbox.size.shape != array.shape:
+                raise ValueError(
+                    f"Explicit bbox size {bbox.size} does not match array with shape {array.shape}."
+                )
+            if size is not None and size.shape != array.shape:
+                raise ValueError(f"Explicit size {size} does not match array with shape {array.shape}.")
+
+        else:
+            if bbox is None:
+                if size is None:
+                    raise TypeError("No bbox, size, or array provided.")
+                bbox = Box.from_size(size, start=start)
+            array = np.full(bbox.size.shape, array_or_fill, dtype=dtype)
         self._array = array
         self._bbox = bbox
         self._unit = unit
-
-    @classmethod
-    def from_zeros(cls, dtype: npt.DTypeLike, bbox: Box, unit: astropy.units.Unit | None = None) -> Image:
-        return cls(np.zeros(bbox.size.shape, dtype=dtype), bbox, unit)
 
     @property
     def array(self) -> np.ndarray:

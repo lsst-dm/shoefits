@@ -5,7 +5,7 @@ __all__ = ("Mask", "MaskPlane", "MaskSchema", "MaskReference")
 import dataclasses
 import math
 from collections.abc import Iterable, Iterator, Mapping
-from typing import Any, Self
+from typing import Any, Self, cast
 
 import numpy as np
 import numpy.typing as npt
@@ -14,17 +14,13 @@ import pydantic_core.core_schema as pcs
 
 from . import asdf_utils
 from ._dtypes import UnsignedIntegerType, numpy_to_str
-from ._field_info import MaskFieldInfo
-from ._geom import Box, Point
+from ._geom import Box, Extent, Point
 
 
 @dataclasses.dataclass(frozen=True)
 class MaskPlane:
     name: str
     description: str
-
-
-MaskFieldInfo.model_rebuild()
 
 
 @dataclasses.dataclass(frozen=True)
@@ -81,14 +77,40 @@ class MaskSchema:
 
 
 class Mask:
-    def __init__(self, array: np.ndarray, bbox: Box, schema: MaskSchema):
+    def __init__(
+        self,
+        array_or_fill: np.ndarray | int = 0,
+        /,
+        *,
+        bbox: Box | None = None,
+        start: Point = Point(x=0, y=0),
+        size: Extent | None = None,
+        schema: MaskSchema,
+    ):
+        if isinstance(array_or_fill, np.ndarray):
+            array = np.array(array_or_fill, dtype=schema.dtype)
+            if bbox is None:
+                bbox = Box.from_size(Extent.from_shape(cast(tuple[int, int], array.shape[:2])), start=start)
+            elif bbox.size.shape + (schema.mask_size,) != array.shape:
+                raise ValueError(
+                    f"Explicit bbox size {bbox.size} and schema of size {schema.mask_size} do not "
+                    f"match array with shape {array.shape}."
+                )
+            if size is not None and size.shape + (schema.mask_size,) != array.shape:
+                raise ValueError(
+                    f"Explicit size {size} and schema of size {schema.mask_size} do "
+                    f"not match array with shape {array.shape}."
+                )
+
+        else:
+            if bbox is None:
+                if size is None:
+                    raise TypeError("No bbox, size, or array provided.")
+                bbox = Box.from_size(size, start=start)
+            array = np.full(bbox.size.shape + (schema.mask_size,), array_or_fill, dtype=schema.dtype)
         self._array = array
         self._bbox = bbox
         self._schema = schema
-
-    @classmethod
-    def from_zeros(cls, dtype: npt.DTypeLike, bbox: Box, schema: MaskSchema) -> Mask:
-        return cls(np.zeros(bbox.size.shape + (schema.mask_size,), dtype=dtype), bbox, schema)
 
     @property
     def array(self) -> np.ndarray:

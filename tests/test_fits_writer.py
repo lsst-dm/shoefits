@@ -13,19 +13,13 @@ import shoefits as shf
 
 def test_image_fits_write() -> None:
     class S(shf.Struct):
-        def __init__(self) -> None:
-            super().__init__()
-            self.image = shf.Image.from_zeros(np.int16, shf.bounds[1:3, 2:6], u.Unit("Jy"))
-            self.alpha = 4.125
-            self.beta = -2
-            x_grid, y_grid = self.image.bbox.meshgrid
-            self.image.array[:, :] = x_grid * 10 + y_grid
-
-        image: shf.Image = shf.Field(dtype=np.int16)
+        image: shf.Image = shf.Field(dtype=np.int16, unit=u.Unit("Jy"))
         alpha: float = shf.Field(fits_header=True)
         beta: int = shf.Field(fits_header=False)
 
-    s = S()
+    s = S(shf.bounds[1:3, 2:6], alpha=4.125, beta=-2)
+    x_grid, y_grid = s.image.bbox.meshgrid
+    s.image.array[:, :] = x_grid * 10 + y_grid
     writer = shf.FitsWriter(s)
     buffer = BytesIO()
     writer.write(buffer)
@@ -95,16 +89,12 @@ def test_compressed_mask_fits_write() -> None:
     )
 
     class S(shf.Struct):
-        def __init__(self) -> None:
-            super().__init__()
-            self.mask = shf.Mask.from_zeros(np.uint8, shf.bounds[1:5, -2:6], mask_schema)
-            self.mask.array[0, 0, :] = mask_schema.bitmask("bad", "interpolated")
-            self.mask.array[0, 2, :] = mask_schema.bitmask("saturated")
-            self.mask.array[1, 3, :] = mask_schema.bitmask("interpolated", "fill5")
+        mask: shf.Mask = shf.Field(dtype=np.uint8, fits_compression=None)
 
-        mask: shf.Mask = shf.Field(fits_compression=None)
-
-    s = S()
+    s = S(mask=shf.Mask(bbox=shf.bounds[1:5, -2:6], schema=mask_schema))
+    s.mask.array[0, 0, :] = mask_schema.bitmask("bad", "interpolated")
+    s.mask.array[0, 2, :] = mask_schema.bitmask("saturated")
+    s.mask.array[1, 3, :] = mask_schema.bitmask("interpolated", "fill5")
     writer = shf.FitsWriter(s)
     buffer = BytesIO()
     writer.write(buffer)
