@@ -6,14 +6,12 @@ __all__ = (
     "IntegerType",
     "FloatType",
     "NumberType",
-    "ValueType",
     "NUMPY_TYPES",
-    "BUILTIN_TYPES",
     "str_to_numpy",
     "numpy_to_str",
+    "ValueType",
 )
 
-import builtins
 from typing import Any, Literal, TypeAlias, get_args
 
 import numpy as np
@@ -36,32 +34,10 @@ NumberType: TypeAlias = Literal[
     "uint8", "uint16", "uint32", "uint64", "int8", "int16", "int32", "int64", "float32", "float64"
 ]
 
-ValueType: TypeAlias = Literal[
-    "uint8",
-    "uint16",
-    "uint32",
-    "uint64",
-    "int8",
-    "int16",
-    "int32",
-    "int64",
-    "float32",
-    "float64",
-    "bool",
-    "str",
-    "bytes",
-]
-
 NUMPY_TYPES: dict[str, type] = {k: getattr(np, k) for k in get_args(NumberType)}
-NUMPY_TYPES["bool"] = np.bool_
-NUMPY_TYPES["str"] = np.str_
-NUMPY_TYPES["bytes"] = np.bytes_
-BUILTIN_TYPES: dict[str, type] = {k: getattr(builtins, k) for k in ["bool", "str", "bytes"]}
-BUILTIN_TYPES.update(dict.fromkeys(get_args(IntegerType), int))
-BUILTIN_TYPES.update(dict.fromkeys(get_args(FloatType), float))
 
 
-def str_to_numpy(s: ValueType) -> type:
+def str_to_numpy(s: NumberType) -> type:
     return NUMPY_TYPES[s]
 
 
@@ -70,3 +46,6 @@ def numpy_to_str(dtype: npt.DTypeLike, kind: Any) -> Any:
     if result not in get_args(kind):
         raise TypeError(f"Invalid dtype {result!r}; expected one of {get_args(kind)}.")
     return result
+
+
+ValueType: TypeAlias = Literal["int", "str", "float"]

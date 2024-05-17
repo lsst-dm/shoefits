@@ -20,7 +20,7 @@ import pydantic
 
 from . import asdf_utils
 from ._compression import FitsCompression
-from ._dtypes import BUILTIN_TYPES, NUMPY_TYPES, NumberType, UnsignedIntegerType, ValueType, numpy_to_str
+from ._dtypes import NumberType, UnsignedIntegerType, ValueType, numpy_to_str
 
 if TYPE_CHECKING:
     from ._frame import Frame
@@ -35,7 +35,7 @@ class FieldInfoBase(pydantic.BaseModel):
 
 @final
 class ValueFieldInfo(FieldInfoBase):
-    dtype: ValueType
+    type_name: ValueType
     unit: asdf_utils.Unit | None = None
     fits_header: bool | str = False
 
@@ -43,27 +43,17 @@ class ValueFieldInfo(FieldInfoBase):
     def build(
         cls, name: str, struct_type: type[Struct], annotation: type[object], **kwargs: Any
     ) -> ValueFieldInfo:
-        kwargs.setdefault("dtype", annotation)
-        field_info = cls.model_validate(kwargs)
-        if (
-            BUILTIN_TYPES[field_info.dtype] is not annotation
-            and NUMPY_TYPES[field_info.dtype] is not annotation
-        ):
-            raise TypeError(
-                f"Annotation {annotation} for field {struct_type.__name__}.{name} is not consistent "
-                f"with dtype={field_info.dtype!r}."
+        if kwargs.setdefault("type_name", annotation.__name__) != annotation.__name__:
+            raise ValueError(
+                f"Annotation {annotation.__name__!r} and type_name={kwargs['type_name']!r} for "
+                f"{struct_type.__name__}.{name} do not agree."
             )
-        return field_info
-
-    @pydantic.field_validator("dtype", mode="before")
-    @classmethod
-    def _accept_numpy(cls, v: Any) -> ValueType:
-        return numpy_to_str(v, ValueType)
+        return cls.model_validate(kwargs)
 
 
 @final
 class ImageFieldInfo(FieldInfoBase):
-    dtype: NumberType
+    type_name: NumberType
     unit: asdf_utils.Unit | None = None
     fits_image_extension: bool | str = True
 
@@ -71,17 +61,18 @@ class ImageFieldInfo(FieldInfoBase):
     def build(
         cls, name: str, struct_type: type[Struct], annotation: type[Image], **kwargs: Any
     ) -> ImageFieldInfo:
+        if dtype_arg := kwargs.pop("dtype", None):
+            dtype_type_name = numpy_to_str(dtype_arg, NumberType)
+            if kwargs.setdefault("type_name", dtype_type_name) != dtype_type_name:
+                raise ValueError(
+                    f"dtype={dtype_arg!r} and type_name={kwargs['type_name']!r} are not consistent."
+                )
         return ImageFieldInfo.model_validate(kwargs)
-
-    @pydantic.field_validator("dtype", mode="before")
-    @classmethod
-    def _accept_numpy(cls, v: Any) -> NumberType:
-        return numpy_to_str(v, NumberType)
 
 
 @final
 class MaskFieldInfo(FieldInfoBase):
-    dtype: UnsignedIntegerType = "uint8"
+    type_name: UnsignedIntegerType = "uint8"
     required_planes: list[MaskPlane] = pydantic.Field(default_factory=list)
     allow_additional_planes: bool = True
     fits_image_extension: bool | str = True
@@ -92,12 +83,13 @@ class MaskFieldInfo(FieldInfoBase):
     def build(
         cls, name: str, struct_type: type[Struct], annotation: type[Mask], **kwargs: Any
     ) -> MaskFieldInfo:
+        if dtype_arg := kwargs.pop("dtype", None):
+            dtype_type_name = numpy_to_str(dtype_arg, NumberType)
+            if kwargs.setdefault("type_name", dtype_type_name) != dtype_type_name:
+                raise ValueError(
+                    f"dtype={dtype_arg!r} and type_name={kwargs['type_name']!r} are not consistent."
+                )
         return MaskFieldInfo.model_validate(kwargs)
-
-    @pydantic.field_validator("dtype", mode="before")
-    @classmethod
-    def _accept_numpy(cls, v: Any) -> NumberType:
-        return numpy_to_str(v, NumberType)
 
 
 @final

@@ -18,7 +18,6 @@ import pydantic
 
 from . import asdf_utils
 from ._compression import FitsCompression
-from ._dtypes import BUILTIN_TYPES
 from ._field_info import (
     FieldInfo,
     HeaderFieldInfo,
@@ -216,9 +215,12 @@ class FitsWriter:
         raise AssertionError()
 
     def _walk_value(
-        self, value: object, field_info: ValueFieldInfo, path: Path, header: astropy.io.fits.Header
+        self,
+        value: int | str | float | None,
+        field_info: ValueFieldInfo,
+        path: Path,
+        header: astropy.io.fits.Header,
     ) -> JsonValue:
-        value = cast(int | str | float | None, BUILTIN_TYPES[field_info.dtype](value))
         if field_info.fits_header:
             if field_info.fits_header is True:
                 header_key = path.default_header_key
