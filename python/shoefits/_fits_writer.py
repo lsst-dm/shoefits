@@ -9,7 +9,7 @@ import warnings
 from collections.abc import Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from io import BytesIO, TextIOWrapper
-from typing import Any, BinaryIO, TypedDict, cast
+from typing import Any, BinaryIO, Literal, TypedDict, cast
 
 import astropy.io.fits
 import astropy.units
@@ -32,7 +32,7 @@ from ._field_info import (
 from ._frame import Frame
 from ._geom import Point
 from ._image import Image, ImageReference
-from ._mask import Mask, MaskReference
+from ._mask import Mask, MaskReference, MaskSchema
 from ._struct import Struct
 from .json_utils import JsonValue
 
@@ -77,6 +77,7 @@ class FitsExtensionLabel:
 
 @dataclasses.dataclass
 class FitsExtensionWriter:
+    path: Path
     parent_header: astropy.io.fits.Header
     extension_only_header: astropy.io.fits.Header
     array: np.ndarray
@@ -147,12 +148,12 @@ class FitsWriter:
         for writer in self.extension_writers:
             full_header = writer.parent_header.copy()
             full_header.update(writer.extension_only_header)
-            if writer.compression is not None:
-                tile_shape = writer.compression.tile_size.shape + writer.array.shape[2:]
+            if compression := self.get_compression(writer.path, writer.compression, writer.array):
+                tile_shape = compression.tile_size.shape + writer.array.shape[2:]
                 hdu = astropy.io.fits.CompImageHDU(
                     writer.array,
                     header=full_header,
-                    compression_type=writer.compression.algorithm.value,
+                    compression_type=compression.algorithm.value,
                     tile_shape=tile_shape,
                 )
                 raise NotImplementedError(
@@ -180,6 +181,39 @@ class FitsWriter:
         asdf_array = np.frombuffer(asdf_buffer.getbuffer(), dtype=np.uint8)
         hdu_list.append(astropy.io.fits.ImageHDU(asdf_array, header=tree_fits_header))
         hdu_list.writeto(buffer)  # TODO: make space for, then add checksums
+
+    def get_header_key(self, path: Path, from_field: str | bool) -> str | None:
+        if from_field:
+            if from_field is True:
+                return path.default_header_key
+            else:
+                return from_field
+        return None
+
+    def get_extension_label(self, path: Path, from_field: str | bool) -> FitsExtensionLabel | None:
+        if from_field:
+            if from_field is True:
+                return path.default_extension_label
+            else:
+                return FitsExtensionLabel(extname=from_field, extver=None, extlevel=path.extlevel)
+        return None
+
+    def get_compression(
+        self, path: Path, from_field: FitsCompression | None, array: np.ndarray
+    ) -> FitsCompression | None:
+        return from_field
+
+    def add_mask_schema_header(
+        self,
+        header: astropy.io.fits.Header,
+        schema: MaskSchema,
+        path: Path,
+        field_style: Literal["afw"] | None,
+    ) -> None:
+        if field_style == "afw":
+            for mask_plane_index, mask_plane in enumerate(schema):
+                if mask_plane is not None:
+                    header.set(f"MP_{mask_plane.name.upper()}", mask_plane_index, mask_plane.description)
 
     def _walk_dispatch(
         self,
@@ -221,11 +255,7 @@ class FitsWriter:
         path: Path,
         header: astropy.io.fits.Header,
     ) -> JsonValue:
-        if field_info.fits_header:
-            if field_info.fits_header is True:
-                header_key = path.default_header_key
-            else:
-                header_key = field_info.fits_header
+        if header_key := self.get_header_key(path, field_info.fits_header):
             header.set(header_key, value, field_info.description)
         return value
 
@@ -233,13 +263,7 @@ class FitsWriter:
         self, image: Image, field_info: ImageFieldInfo, path: Path, header: astropy.io.fits.Header
     ) -> JsonValue:
         source: int | str
-        if field_info.fits_image_extension:
-            if field_info.fits_image_extension is True:
-                label = path.default_extension_label
-            else:
-                label = FitsExtensionLabel(
-                    extname=field_info.fits_image_extension, extver=None, extlevel=path.extlevel
-                )
+        if label := self.get_extension_label(path, field_info.fits_image_extension):
             extension_only_header = astropy.io.fits.Header()
             if image.unit is not None:
                 extension_only_header["BUNIT"] = image.unit.to_string(format="fits")
@@ -248,6 +272,7 @@ class FitsWriter:
             result = ImageReference.from_image_and_source(image, label.asdf_source).model_dump()
             self.extension_writers.append(
                 FitsExtensionWriter(
+                    path=path,
                     array=image.array,
                     parent_header=header,
                     extension_only_header=extension_only_header,
@@ -263,25 +288,17 @@ class FitsWriter:
         self, mask: Mask, field_info: MaskFieldInfo, path: Path, header: astropy.io.fits.Header
     ) -> JsonValue:
         source: int | str
-        if field_info.fits_image_extension:
-            if field_info.fits_image_extension is True:
-                label = path.default_extension_label
-            else:
-                label = FitsExtensionLabel(
-                    extname=field_info.fits_image_extension, extver=None, extlevel=path.extlevel
-                )
+        if label := self.get_extension_label(path, field_info.fits_image_extension):
             extension_only_header = astropy.io.fits.Header()
             label.update_header(extension_only_header)
             self._add_array_start_wcs(mask.bbox.start, extension_only_header)
-            if field_info.fits_plane_header_style == "afw":
-                for mask_plane_index, mask_plane in enumerate(mask.schema):
-                    if mask_plane is not None:
-                        extension_only_header.set(
-                            f"MP_{mask_plane.name.upper()}", mask_plane_index, mask_plane.description
-                        )
+            self.add_mask_schema_header(
+                extension_only_header, mask.schema, path, field_info.fits_plane_header_style
+            )
             result = MaskReference.from_mask_and_source(mask, label.asdf_source).model_dump()
             self.extension_writers.append(
                 FitsExtensionWriter(
+                    path=path,
                     array=mask.array,
                     parent_header=header,
                     extension_only_header=extension_only_header,
