@@ -127,13 +127,15 @@ class FitsWriter:
         path = Path()
         if is_frame := isinstance(struct, Frame):
             path.reset()
-        primary_header = astropy.io.fits.Header()
+        self.primary_header = astropy.io.fits.Header()
         self.hdu_addressed: list[AddressedTreeData] = [{}]
         # Squash astropy warnings about needing HIERARCH, since the only way to
-        # get it do HIERARCH only when needed is to let it warn.
+        # get it to do HIERARCH only when needed is to let it warn.
         with warnings.catch_warnings(category=astropy.io.fits.verify.VerifyWarning, action="ignore"):
-            self.tree = self._walk_struct(struct, path, header=primary_header, is_frame=is_frame)
-        self.primary_hdu.header.update(primary_header)
+            self.tree = self._walk_struct(struct, path, header=None, is_frame=is_frame)
+        for n, block_size in enumerate(self.block_writer.sizes()):
+            self.primary_hdu.header.set(f"BLK{n:05d}", block_size, f"Size of ASDF block {n} (bytes).")
+        self.primary_hdu.header.update(self.primary_header)
 
     def write(self, buffer: BinaryIO) -> None:
         address = 0
@@ -220,7 +222,7 @@ class FitsWriter:
         value: Any,
         field_info: FieldInfo,
         path: Path,
-        header: astropy.io.fits.Header,
+        header: astropy.io.fits.Header | None,
     ) -> JsonValue:
         match field_info:
             case ValueFieldInfo():
@@ -253,14 +255,16 @@ class FitsWriter:
         value: int | str | float | None,
         field_info: ValueFieldInfo,
         path: Path,
-        header: astropy.io.fits.Header,
+        header: astropy.io.fits.Header | None,
     ) -> JsonValue:
+        if header is None:
+            header = self.primary_header
         if header_key := self.get_header_key(path, field_info.fits_header):
             header.set(header_key, value, field_info.description)
         return value
 
     def _walk_image(
-        self, image: Image, field_info: ImageFieldInfo, path: Path, header: astropy.io.fits.Header
+        self, image: Image, field_info: ImageFieldInfo, path: Path, header: astropy.io.fits.Header | None
     ) -> JsonValue:
         source: int | str
         if label := self.get_extension_label(path, field_info.fits_image_extension):
@@ -285,7 +289,7 @@ class FitsWriter:
             return ImageReference.from_image_and_source(image, source).model_dump()
 
     def _walk_mask(
-        self, mask: Mask, field_info: MaskFieldInfo, path: Path, header: astropy.io.fits.Header
+        self, mask: Mask, field_info: MaskFieldInfo, path: Path, header: astropy.io.fits.Header | None
     ) -> JsonValue:
         source: int | str
         if label := self.get_extension_label(path, field_info.fits_image_extension):
@@ -315,11 +319,14 @@ class FitsWriter:
         self,
         struct: Struct,
         path: Path,
-        header: astropy.io.fits.Header,
+        header: astropy.io.fits.Header | None,
         is_frame: bool,
     ) -> JsonValue:
         if is_frame:
-            header = header.copy()
+            if header is None:
+                header = astropy.io.fits.Header()
+            else:
+                header = header.copy()
         result_data: dict[str, JsonValue] = {}
         for name, field_info in struct.struct_fields.items():
             with handle_skips():
@@ -333,7 +340,7 @@ class FitsWriter:
         mapping: Mapping[str, Any],
         field_info: MappingFieldInfo,
         path: Path,
-        header: astropy.io.fits.Header,
+        header: astropy.io.fits.Header | None,
     ) -> JsonValue:
         result: dict[str, JsonValue] = {}
         for name, value in mapping.items():
@@ -346,7 +353,7 @@ class FitsWriter:
         sequence: Sequence[Any],
         field_info: SequenceFieldInfo,
         path: Path,
-        header: astropy.io.fits.Header,
+        header: astropy.io.fits.Header | None,
     ) -> JsonValue:
         result: list[JsonValue] = []
         for index, value in enumerate(sequence):
@@ -359,7 +366,7 @@ class FitsWriter:
         model: pydantic.BaseModel,
         field_info: ModelFieldInfo,
         path: Path,
-        header: astropy.io.fits.Header,
+        header: astropy.io.fits.Header | None,
     ) -> JsonValue:
         context = {"block_writer": self.block_writer}
         return model.model_dump(context=context)
@@ -369,9 +376,18 @@ class FitsWriter:
         value: astropy.io.fits.Header,
         field_info: HeaderFieldInfo,
         path: Path,
-        header: astropy.io.fits.Header,
+        header: astropy.io.fits.Header | None,
     ) -> JsonValue:
-        header.update(value)
+        if header is not None:
+            if value:
+                warnings.warn(
+                    f"Header field at {path} is nested within a frame other than the root of the tree "
+                    "being written to disk, and hence cannot be populated read. Clear the header field "
+                    "writing to avoid this warning (there is no warning on read)."
+                )
+                header.update(value)
+            raise SkipNode()
+        self.primary_header.update(value)
         raise SkipNode()
 
     def _add_array_start_wcs(self, start: Point, header: astropy.io.fits.Header, wcs_name: str = "A") -> None:

@@ -125,3 +125,8 @@ class ImageReference(pydantic.BaseModel):
         if info.context is not None:
             info.context["addressed"] = result
         return result
+
+    def unpack(self) -> tuple[asdf_utils.NdArray, asdf_utils.Unit | None]:
+        if isinstance(self.data, asdf_utils.Quantity):
+            return self.data.value, self.data.unit
+        return self.data, None

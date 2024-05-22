@@ -7,6 +7,7 @@ __all__ = (
     "Unit",
 )
 
+from collections.abc import Iterable
 from typing import Annotated, BinaryIO, Literal, TypeAlias
 
 import astropy.units
@@ -32,6 +33,11 @@ class BlockWriter:
     def write(self, buffer: BinaryIO) -> None:
         if self._arrays:
             raise NotImplementedError("TODO")
+
+    def sizes(self) -> Iterable[int]:
+        if self._arrays:
+            raise NotImplementedError("TODO")
+        return ()
 
 
 def _deserialize_unit(value: object, handler: pydantic.ValidatorFunctionWrapHandler) -> astropy.units.Unit:

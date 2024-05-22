@@ -4,7 +4,7 @@ __all__ = ("Struct", "Field")
 
 from abc import ABC
 from collections.abc import Mapping
-from typing import Any, ClassVar, dataclass_transform, get_type_hints
+from typing import Any, ClassVar, Self, dataclass_transform, get_type_hints
 
 from ._field_info import FieldInfo, _build_field_info
 from ._geom import Box
@@ -26,7 +26,7 @@ class Field:
 
 @dataclass_transform(eq_default=False, kw_only_default=True, field_specifiers=(Field,))
 class Struct(ABC):
-    def __new__(cls, *args: Any, **kwargs: Any) -> Struct:
+    def __new__(cls, *args: Any, **kwargs: Any) -> Self:
         self = super().__new__(cls)
         self._struct_data = {}
         return self
@@ -57,6 +57,12 @@ class Struct(ABC):
                     ) from None
                 struct_fields[name] = _build_field_info(cls, name, annotation, kwargs)
         cls.struct_fields = struct_fields
+
+    @classmethod
+    def _from_struct_data(cls, struct_data: dict[str, Any]) -> Self:
+        result = cls.__new__(cls)
+        result._struct_data.update(struct_data)
+        return result
 
     _struct_data: dict[str, Any]
     struct_fields: ClassVar[Mapping[str, FieldInfo]]

@@ -47,7 +47,7 @@ class Extent(BaseGeometry):
     zero: ClassVar[Extent]
 
     @classmethod
-    def from_shape(cls, shape: tuple[int, int]) -> Extent:
+    def from_shape(cls, shape: tuple[int, ...]) -> Extent:
         return cls(x=shape[1], y=shape[0])
 
     @property
@@ -120,9 +120,19 @@ class Interval(BaseGeometry):
 
     @pydantic.model_validator(mode="after")
     def _validate(self) -> Interval:
-        if self.start >= self.stop:
-            raise ValueError("Intervals must have nonnegative size.")
+        if self.start > self.stop:
+            raise ValueError("Intervals must have positive size.")
         return self
+
+    def contains(self, other: Interval) -> bool:
+        return self.start <= other.start and self.stop >= other.stop
+
+    def intersection(self, other: Interval) -> Interval | None:
+        new_start = max(self.start, other.start)
+        new_stop = min(self.stop, other.stop)
+        if new_start < new_stop:
+            return Interval.model_construct(start=new_start, stop=new_stop)
+        return None
 
 
 @final
@@ -174,6 +184,16 @@ class Box(BaseGeometry):
 
     def __sub__(self, other: Extent) -> Box:
         return Box(x=self.x - other.x, y=self.y - other.y)
+
+    def intersection(self, other: Box) -> Box | None:
+        x = self.x.intersection(other.x)
+        y = self.y.intersection(other.y)
+        if x is None or y is None:
+            return None
+        return Box.model_construct(x=x, y=y)
+
+    def contains(self, other: Box) -> bool:
+        return self.x.contains(other.x) and self.y.contains(other.y)
 
 
 class BoundsFactory:

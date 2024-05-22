@@ -125,8 +125,7 @@ class ImageFieldInfo(FieldInfoBase):
 @dataclasses.dataclass(kw_only=True)
 class MaskFieldInfo(FieldInfoBase):
     type_name: UnsignedIntegerType = "uint8"
-    required_planes: list[MaskPlane] = pydantic.Field(default_factory=list)
-    allow_additional_planes: bool = True
+    default_planes: list[MaskPlane] = pydantic.Field(default_factory=list)
     use_parent_bbox: bool = True
     fits_image_extension: bool | str = True
     fits_plane_header_style: Literal["afw"] | None = "afw"
@@ -155,7 +154,7 @@ class MaskFieldInfo(FieldInfoBase):
         from ._mask import Mask, MaskSchema
 
         if self.default is not None and self.use_parent_bbox:
-            schema = MaskSchema(self.required_planes, dtype=self.type_name)
+            schema = MaskSchema(self.default_planes, dtype=self.type_name)
             return Mask(self.default, bbox=parent_bbox, schema=schema)
         return super().get_default(struct_type, name, parent_bbox)
 
@@ -197,9 +196,9 @@ class StructFieldInfo(FieldInfoBase):
 @final
 @dataclasses.dataclass(kw_only=True)
 class MappingFieldInfo(FieldInfoBase):
-    cls: type[Mapping]
     value: FieldInfo
     default_factory: Callable[[Box | None], Mapping[str, Any]] | None
+    load_factory: Callable[[dict[str, Any]], Mapping[str, Any]]
 
     @classmethod
     def build(
@@ -210,6 +209,7 @@ class MappingFieldInfo(FieldInfoBase):
         annotation: Any,
         *,
         default_factory: Callable[[Box | None], Mapping[str, Any]] | None = None,
+        load_factory: Callable[[dict[str, Any]], Mapping[str, Any]] | None = None,
         value: Field | None = None,
         **kwargs: Any,
     ) -> MappingFieldInfo:
@@ -220,10 +220,12 @@ class MappingFieldInfo(FieldInfoBase):
             )
         if value is not None:
             kwargs.update(value._kwargs)
+        if load_factory is None:
+            load_factory = origin_type
         return cls(
-            cls=origin_type,
             value=_build_field_info(struct_type, name, value_type, kwargs),
             default_factory=default_factory,
+            load_factory=load_factory,
         )
 
     def get_default(self, struct_type: type[Struct], name: str, parent_bbox: Box | None) -> Any:
@@ -235,9 +237,9 @@ class MappingFieldInfo(FieldInfoBase):
 @final
 @dataclasses.dataclass(kw_only=True)
 class SequenceFieldInfo(FieldInfoBase):
-    cls: type[Sequence]
     value: FieldInfo
     default_factory: Callable[[Box | None], Sequence] | None
+    load_factory: Callable[[list[Any]], Sequence[Any]]
 
     @classmethod
     def build(
@@ -248,16 +250,19 @@ class SequenceFieldInfo(FieldInfoBase):
         annotation: Any,
         *,
         default_factory: Callable[[Box | None], Sequence] | None = None,
+        load_factory: Callable[[list[Any]], Sequence[Any]] | None = None,
         value: Field | None = None,
         **kwargs: Any,
     ) -> SequenceFieldInfo:
         value_type = get_args(annotation)
         if value is not None:
             kwargs.update(value._kwargs)
+        if load_factory is None:
+            load_factory = origin_type
         return cls(
-            cls=origin_type,
             value=_build_field_info(struct_type, name, value_type, kwargs),
             default_factory=default_factory,
+            load_factory=load_factory,
         )
 
     def get_default(self, struct_type: type[Struct], name: str, parent_bbox: Box | None) -> Any:
