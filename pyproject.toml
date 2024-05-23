@@ -1,3 +1,7 @@
+[build-system]
+requires = ["setuptools", "lsst-versions >= 1.3.0"]
+build-backend = "setuptools.build_meta"
+
 [project]
 name = "shoefits"
 requires-python = ">=3.11.0"
@@ -6,6 +10,7 @@ license = {text = "BSD 3-Clause License"}
 readme = "README.md"
 authors = [
     {name="Jim Bosch", email="jbosch@astro.princeton.edu"},
+    {name="Rubin Observatory Data Management", email="dm-admin@lists.lsst.org"},
 ]
 classifiers = [
     "Intended Audience :: Science/Research",
@@ -21,14 +26,64 @@ dependencies = [
     "astropy >=6.0",
     "pydantic >=2.7,<3.0",
     "numpy >=1.20",
-    "jsonpointer >=2.0",
-    "pyyaml >=6.0"
+    "lsst-utils",
+    "lsst-shoefits",
 ]
+dynamic = ["version"]
+
+[project.urls]
+"Homepage" = "https://github.com/lsst-dm/shoefits"
 
 [project.optional-dependencies]
 test = [
     "pytest >= 8.2",
 ]
+# Also expose the optional dependencies of lsst-resources as optional
+# dependencies.  This package doesn't care what resource methods are available,
+# but downstream code may view it as a black box and lsst-resources as an
+# internal implementation detail, and therefore may find it more logical to
+# specify optional dependencies here.
+s3 = ["lsst-resources[s3]"]
+https = ["lsst-resources[https]"]
+gs = ["lsst-resources[gs]"]
+
+[tool.towncrier]
+    package = "lsst.shoefits"
+    package_dir = "python"
+    filename = "doc/lsst.shoefits/CHANGES.rst"
+    directory = "doc/changes"
+    title_format = "Resources {version} {project_date}"
+    issue_format = "`{issue} <https://jira.lsstcorp.org/browse/{issue}>`_"
+
+    [[tool.towncrier.type]]
+        directory = "feature"
+        name = "New Features"
+        showcontent = true
+
+    [[tool.towncrier.type]]
+        directory = "api"
+        name = "API Changes"
+        showcontent = true
+
+    [[tool.towncrier.type]]
+        directory = "bugfix"
+        name = "Bug Fixes"
+        showcontent = true
+
+    [[tool.towncrier.type]]
+        directory = "perf"
+        name = "Performance Enhancement"
+        showcontent = true
+
+    [[tool.towncrier.type]]
+        directory = "misc"
+        name = "Miscellaneous Changes of Minor Interest"
+        showcontent = true
+
+    [[tool.towncrier.type]]
+        directory = "removal"
+        name = "An API Removal or Deprecation"
+        showcontent = true
 
 [tool.setuptools.packages.find]
 where = ["python"]
@@ -39,6 +94,12 @@ license-files = ["COPYRIGHT", "LICENSE", "bsd_license.txt", "gpl-v3.0.txt"]
 
 [tool.setuptools.package-data]
 "shoefits" = ["py.typed"]
+
+[tool.setuptools.dynamic]
+version = { attr = "lsst_versions.get_lsst_version" }
+
+[tool.lsst_versions]
+write_to = "python/shoefits/version.py"
 
 [tool.pydocstyle]
 convention = "numpy"

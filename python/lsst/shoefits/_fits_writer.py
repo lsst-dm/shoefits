@@ -1,3 +1,14 @@
+# This file is part of lsst-shoefits.
+#
+# Developed for the LSST Data Management System.
+# This product includes software developed by the LSST Project
+# (https://www.lsst.org).
+# See the COPYRIGHT file at the top-level directory of this distribution
+# for details of code ownership.
+#
+# Use of this source code is governed by a 3-clause BSD-style
+# license that can be found in the LICENSE file.
+
 from __future__ import annotations
 
 __all__ = ("FitsWriter",)
@@ -78,7 +89,7 @@ class FitsExtensionLabel:
 @dataclasses.dataclass
 class FitsExtensionWriter:
     path: Path
-    parent_header: astropy.io.fits.Header
+    parent_header: astropy.io.fits.Header | None
     extension_only_header: astropy.io.fits.Header
     array: np.ndarray
     addressed: AddressedTreeData
@@ -148,7 +159,11 @@ class FitsWriter:
         # padding zeros.
         address += len(self.primary_hdu.header.tostring())
         for writer in self.extension_writers:
-            full_header = writer.parent_header.copy()
+            if writer.parent_header is None:
+                full_header = astropy.io.fits.Header()
+            else:
+                full_header = writer.parent_header.copy()
+            full_header.set("INHERIT", True)
             full_header.update(writer.extension_only_header)
             if compression := self.get_compression(writer.path, writer.compression, writer.array):
                 tile_shape = compression.tile_size.shape + writer.array.shape[2:]

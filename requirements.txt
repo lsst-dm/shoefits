@@ -1,0 +1,6 @@
+lsst-utils @ git+https://github.com/lsst/utils@main
+lsst-resources[https,s3] @ git+https://github.com/lsst/resources@main
+
+astropy >=6.0
+pydantic >=2.7,<3.0
+numpy >=1.20

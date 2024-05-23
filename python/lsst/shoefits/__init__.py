@@ -1,3 +1,14 @@
+# This file is part of lsst-shoefits.
+#
+# Developed for the LSST Data Management System.
+# This product includes software developed by the LSST Project
+# (https://www.lsst.org).
+# See the COPYRIGHT file at the top-level directory of this distribution
+# for details of code ownership.
+#
+# Use of this source code is governed by a 3-clause BSD-style
+# license that can be found in the LICENSE file.
+
 __all__ = (
     "bounds",
     "Box",
@@ -24,6 +35,10 @@ __all__ = (
     "Struct",
     "StructFieldInfo",
     "ValueFieldInfo",
+    "__version__",
+    "__repo_version__",
+    "__fingerprint__",
+    "__dependency_versions__",
 )
 
 from ._compression import FitsCompression, FitsCompressionAlgorithm
@@ -44,3 +59,4 @@ from ._geom import Box, Extent, Interval, Point, bounds
 from ._image import Image
 from ._mask import Mask, MaskPlane, MaskSchema
 from ._struct import Field, Struct
+from .version import __dependency_versions__, __fingerprint__, __repo_version__, __version__

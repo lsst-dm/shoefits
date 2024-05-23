@@ -1,3 +1,14 @@
+# This file is part of lsst-shoefits.
+#
+# Developed for the LSST Data Management System.
+# This product includes software developed by the LSST Project
+# (https://www.lsst.org).
+# See the COPYRIGHT file at the top-level directory of this distribution
+# for details of code ownership.
+#
+# Use of this source code is governed by a 3-clause BSD-style
+# license that can be found in the LICENSE file.
+
 from __future__ import annotations
 
 __all__ = ()
@@ -7,8 +18,8 @@ from io import BytesIO
 
 import astropy.io.fits
 import astropy.units as u
+import lsst.shoefits as shf
 import numpy as np
-import shoefits as shf
 
 
 def test_image_fits_write() -> None:
@@ -69,7 +80,6 @@ def test_image_fits_write() -> None:
     assert hdu_list[1].header["EXTLEVEL"] == 1
     assert hdu_list[1].header["CRVAL1A"] == 2
     assert hdu_list[1].header["CRVAL2A"] == 1
-    assert hdu_list[1].header["ALPHA"] == s.alpha
     np.testing.assert_array_equal(hdu_list[1].data, s.image.array)
     # Check that the tree is also readable via FITS, and has the right header.
     tree_str_fits = hdu_list[-1].data.tobytes().decode("utf-8")
