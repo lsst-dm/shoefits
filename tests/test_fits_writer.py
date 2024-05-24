@@ -15,23 +15,26 @@ __all__ = ()
 
 import json
 from io import BytesIO
+from typing import cast
 
 import astropy.io.fits
 import astropy.units as u
 import lsst.shoefits as shf
 import numpy as np
 
+adapter_registry = shf.PolymorphicAdapterRegistry()
+
 
 def test_image_fits_write() -> None:
     class S(shf.Struct):
-        image: shf.Image = shf.Field(dtype=np.int16, unit=u.Unit("Jy"))
-        alpha: float = shf.Field(fits_header=True)
-        beta: int = shf.Field(fits_header=False)
+        image: shf.Image = shf.field(dtype=np.int16, unit=u.Unit("Jy"))
+        alpha: float = shf.field(fits_header=True)
+        beta: int = shf.field(fits_header=False)
 
-    s = S(shf.bounds[1:3, 2:6], alpha=4.125, beta=-2)
+    s = S.from_box(shf.bounds[1:3, 2:6], alpha=4.125, beta=-2)
     x_grid, y_grid = s.image.bbox.meshgrid
     s.image.array[:, :] = x_grid * 10 + y_grid
-    writer = shf.FitsWriter(s)
+    writer = shf.FitsWriter(s, adapter_registry)
     buffer = BytesIO()
     writer.write(buffer)
     buffer.seek(0)
@@ -46,7 +49,7 @@ def test_image_fits_write() -> None:
     tree_address = hdu_list[0].header["TREEADDR"]
     tree_size = hdu_list[0].header["TREESIZE"]
     tree_str = buffer_bytes[tree_address : tree_address + tree_size].decode("utf-8")
-    tree = json.loads(tree_str)
+    tree: shf.json_utils.JsonValue = json.loads(tree_str)
     match tree:
         case {"image": image_tree, "alpha": s.alpha, "beta": s.beta}:
             pass
@@ -99,13 +102,13 @@ def test_compressed_mask_fits_write() -> None:
     )
 
     class S(shf.Struct):
-        mask: shf.Mask = shf.Field(dtype=np.uint8, fits_compression=None)
+        mask: shf.Mask = shf.field(dtype=np.uint8, fits_compression=None)
 
     s = S(mask=shf.Mask(bbox=shf.bounds[1:5, -2:6], schema=mask_schema))
     s.mask.array[0, 0, :] = mask_schema.bitmask("bad", "interpolated")
     s.mask.array[0, 2, :] = mask_schema.bitmask("saturated")
     s.mask.array[1, 3, :] = mask_schema.bitmask("interpolated", "fill5")
-    writer = shf.FitsWriter(s)
+    writer = shf.FitsWriter(s, adapter_registry)
     buffer = BytesIO()
     writer.write(buffer)
     buffer.seek(0)
@@ -120,7 +123,7 @@ def test_compressed_mask_fits_write() -> None:
     tree_address = hdu_list[0].header["TREEADDR"]
     tree_size = hdu_list[0].header["TREESIZE"]
     tree_str = buffer_bytes[tree_address : tree_address + tree_size].decode("utf-8")
-    tree = json.loads(tree_str)
+    tree: shf.json_utils.JsonValue = json.loads(tree_str)
     match tree:
         case {"mask": mask_tree}:
             pass
@@ -136,13 +139,13 @@ def test_compressed_mask_fits_write() -> None:
             },
             "start": {"x": -2, "y": 1},
             "address": int(image_address),
-            "planes": planes_list,
+            "planes": list(planes_list),
         }:
             pass
         case _:
             raise AssertionError(mask_tree)
     assert len(planes_list) == len(mask_schema)
-    assert shf.MaskPlane(**planes_list[0]) == mask_schema[0]
+    assert shf.MaskPlane(**cast(dict, planes_list[0])) == mask_schema[0]
     assert planes_list[1] is None
     # Check that the image address in the tree is correct.
     array = np.frombuffer(

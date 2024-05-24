@@ -11,7 +11,7 @@
 
 from __future__ import annotations
 
-__all__ = ("FitsReader",)
+__all__ = ("FitsReader", "ReadError")
 
 import json
 import math
@@ -30,6 +30,7 @@ from ._field_info import (
     MappingFieldInfo,
     MaskFieldInfo,
     ModelFieldInfo,
+    PolymorphicFieldInfo,
     SequenceFieldInfo,
     StructFieldInfo,
     ValueFieldInfo,
@@ -37,6 +38,7 @@ from ._field_info import (
 from ._geom import Box, Extent, Point
 from ._image import Image, ImageReference
 from ._mask import Mask, MaskReference, MaskSchema
+from ._polymorphic import PolymorphicAdapter, PolymorphicAdapterRegistry
 from ._struct import Struct
 from .json_utils import JsonValue
 
@@ -60,6 +62,8 @@ class FitsReader(Generic[_T]):
         root_type: type[_T],
         buffer: BinaryIO,
         parameters: Mapping[str, Any] | None = None,
+        *,
+        adapter_registry: PolymorphicAdapterRegistry,
     ):
         self._buffer = buffer
         self._root_type = root_type
@@ -67,6 +71,7 @@ class FitsReader(Generic[_T]):
         self._block_addresses: list[tuple[int, int]] = []
         self._primary_header: astropy.io.fits.Header = astropy.io.fits.getheader(self._buffer, 0)
         self._tree = self._read_tree_and_addresses()
+        self._adapter_registry = adapter_registry
 
     def _read_tree_and_addresses(self) -> dict[str, JsonValue]:
         tree_address = self._primary_header.pop("TREEADDR")
@@ -253,8 +258,22 @@ class FitsReader(Generic[_T]):
         return field_info.cls.model_validate(tree)
 
     def _read_header(
-        self, field_info: HeaderFieldInfo, tree: Any, path: str, frame_depth: int
+        self, field_info: HeaderFieldInfo, tree: JsonValue, path: str, frame_depth: int
     ) -> astropy.io.fits.Header:
         if frame_depth == 0:
             return self._primary_header.copy()
         return astropy.io.fits.Header()
+
+    def _read_polymorphic(
+        self, field_info: PolymorphicFieldInfo, tree: dict[str, JsonValue], path: str, frame_depth: int
+    ) -> Any:
+        match tree:
+            case {"tag": str(tag)}:
+                pass
+            case _:
+                raise ReadError(f"No string 'tag' entry found for polymorphic field at {path}.")
+        adapter: PolymorphicAdapter[Any, Struct] = self._adapter_registry[tag]
+        if "tag" not in adapter.struct_type.struct_fields:
+            del tree["tag"]
+        struct = self._read_struct(field_info.as_struct(adapter.struct_type), tree, path, frame_depth, None)
+        return adapter.from_struct(struct)

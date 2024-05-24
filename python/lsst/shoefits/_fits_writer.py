@@ -11,7 +11,7 @@
 
 from __future__ import annotations
 
-__all__ = ("FitsWriter",)
+__all__ = ("FitsWriter", "WriteError")
 
 
 import dataclasses
@@ -36,6 +36,7 @@ from ._field_info import (
     MappingFieldInfo,
     MaskFieldInfo,
     ModelFieldInfo,
+    PolymorphicFieldInfo,
     SequenceFieldInfo,
     StructFieldInfo,
     ValueFieldInfo,
@@ -44,10 +45,15 @@ from ._frame import Frame
 from ._geom import Point
 from ._image import Image, ImageReference
 from ._mask import Mask, MaskReference, MaskSchema
+from ._polymorphic import PolymorphicAdapterRegistry
 from ._struct import Struct
 from .json_utils import JsonValue
 
 FORMAT_VERSION = (0, 0, 1)
+
+
+class WriteError(RuntimeError):
+    pass
 
 
 class AddressedTreeData(TypedDict, total=False):
@@ -126,7 +132,7 @@ class Path:
 
 
 class FitsWriter:
-    def __init__(self, struct: Struct):
+    def __init__(self, struct: Struct, adapter_registry: PolymorphicAdapterRegistry):
         self.primary_hdu = astropy.io.fits.PrimaryHDU()
         self.primary_hdu.header.set(
             "SHOEFITS", ".".join(str(v) for v in FORMAT_VERSION), "SHOEFITS format version."
@@ -147,6 +153,7 @@ class FitsWriter:
         for n, block_size in enumerate(self.block_writer.sizes()):
             self.primary_hdu.header.set(f"BLK{n:05d}", block_size, f"Size of ASDF block {n} (bytes).")
         self.primary_hdu.header.update(self.primary_header)
+        self._adapter_registry = adapter_registry
 
     def write(self, buffer: BinaryIO) -> None:
         address = 0
@@ -263,6 +270,8 @@ class FitsWriter:
                 return self._walk_model(value, field_info, path, header)
             case HeaderFieldInfo():
                 return self._walk_header(value, field_info, path, header)
+            case PolymorphicFieldInfo():
+                return self._walk_polymorphic(value, field_info, path, header)
         raise AssertionError()
 
     def _walk_value(
@@ -336,7 +345,7 @@ class FitsWriter:
         path: Path,
         header: astropy.io.fits.Header | None,
         is_frame: bool,
-    ) -> JsonValue:
+    ) -> dict[str, JsonValue]:
         if is_frame:
             if header is None:
                 header = astropy.io.fits.Header()
@@ -404,6 +413,26 @@ class FitsWriter:
             raise SkipNode()
         self.primary_header.update(value)
         raise SkipNode()
+
+    def _walk_polymorphic(
+        self,
+        obj: Any,
+        field_info: PolymorphicFieldInfo,
+        path: Path,
+        header: astropy.io.fits.Header | None,
+    ) -> JsonValue:
+        tag = field_info.get_tag(obj)
+        adapter = self._adapter_registry[tag]
+        struct = adapter.to_struct(obj)
+        if is_frame := isinstance(struct, Frame):
+            path = path.reset()
+        data = self._walk_struct(struct, path, header, is_frame=is_frame)
+        if data.setdefault("tag", tag) != tag:
+            raise WriteError(
+                f"Serialized form of {path} already has tag={data['tag']!r}, "
+                f"which is inconsistent with tag={tag!r} from the get_tag callback."
+            )
+        return data
 
     def _add_array_start_wcs(self, start: Point, header: astropy.io.fits.Header, wcs_name: str = "A") -> None:
         header.set(f"CTYPE1{wcs_name}", "LINEAR", "Type of projection")

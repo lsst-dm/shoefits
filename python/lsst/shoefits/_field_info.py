@@ -20,6 +20,7 @@ __all__ = (
     "SequenceFieldInfo",
     "ModelFieldInfo",
     "HeaderFieldInfo",
+    "PolymorphicFieldInfo",
     "FieldInfo",
 )
 import dataclasses
@@ -39,6 +40,7 @@ from ._geom import Box
 if TYPE_CHECKING:
     from ._image import Image
     from ._mask import Mask, MaskPlane
+    from ._polymorphic import GetPolymorphicTag
     from ._struct import Field, Struct
 
 
@@ -56,6 +58,7 @@ def no_bbox(factory: Callable[[], _R]) -> Callable[[Box | None], _R]:
 class FieldInfoBase:
     description: str = ""
     allow_none: bool = False
+    on_load_failure: Literal["raise", "warn", "ignore"] = "raise"
 
     def get_default(self, struct_type: type[Struct], name: str, parent_bbox: Box | None) -> Any:
         if self.allow_none:
@@ -305,6 +308,44 @@ class HeaderFieldInfo(FieldInfoBase):
         return cls(**kwargs)
 
 
+@final
+@dataclasses.dataclass(kw_only=True)
+class PolymorphicFieldInfo(FieldInfoBase):
+    get_tag: GetPolymorphicTag
+    on_load_failure: Literal["raise", "warn", "ignore"] = "ignore"
+    use_parent_bbox: bool = True
+    default_factory: Callable[[Box | None], Struct] | None
+
+    @classmethod
+    def build(
+        cls,
+        name: str,
+        struct_type: type[Struct],
+        annotation: Any,
+        *,
+        get_tag: GetPolymorphicTag | None = None,
+        **kwargs: Any,
+    ) -> PolymorphicFieldInfo:
+        from ._polymorphic import get_tag_from_registry
+
+        if get_tag is None:
+            get_tag = get_tag_from_registry
+        return cls(get_tag=get_tag, **kwargs)
+
+    def as_struct(self, struct_type: type[Struct]) -> StructFieldInfo:
+        from ._frame import Frame
+
+        return StructFieldInfo(
+            description=self.description,
+            allow_none=self.allow_none,
+            on_load_failure=self.on_load_failure,
+            cls=struct_type,
+            is_frame=issubclass(struct_type, Frame),
+            use_parent_bbox=self.use_parent_bbox,
+            default_factory=self.default_factory,
+        )
+
+
 FieldInfo: TypeAlias = Union[
     ValueFieldInfo,
     ImageFieldInfo,
@@ -314,6 +355,7 @@ FieldInfo: TypeAlias = Union[
     ModelFieldInfo,
     HeaderFieldInfo,
     StructFieldInfo,
+    PolymorphicFieldInfo,
 ]
 
 
@@ -327,6 +369,9 @@ def _build_field_info(
     from ._image import Image
     from ._mask import Mask
     from ._struct import Struct
+
+    if kwargs.pop("polymorphic", False):
+        return PolymorphicFieldInfo.build(name, struct_type, annotation, **kwargs)
 
     if isinstance(annotation, type):
         if kwargs.get("allow_none", False) and not annotation_had_none_stripped:

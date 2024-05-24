@@ -10,9 +10,14 @@
 # license that can be found in the LICENSE file.
 
 __all__ = (
+    "__dependency_versions__",
+    "__fingerprint__",
+    "__repo_version__",
+    "__version__",
     "bounds",
     "Box",
     "Extent",
+    "field",
     "Field",
     "FieldInfo",
     "FitsCompression",
@@ -20,6 +25,7 @@ __all__ = (
     "FitsWriter",
     "FORMAT_VERSION",
     "Frame",
+    "GetPolymorphicTag",
     "HeaderFieldInfo",
     "Image",
     "ImageFieldInfo",
@@ -31,16 +37,17 @@ __all__ = (
     "MaskSchema",
     "ModelFieldInfo",
     "Point",
+    "PolymorphicAdapter",
+    "PolymorphicAdapterRegistry",
     "SequenceFieldInfo",
     "Struct",
     "StructFieldInfo",
     "ValueFieldInfo",
-    "__version__",
-    "__repo_version__",
-    "__fingerprint__",
-    "__dependency_versions__",
+    "asdf_utils",
+    "json_utils",
 )
 
+from . import asdf_utils, json_utils
 from ._compression import FitsCompression, FitsCompressionAlgorithm
 from ._field_info import (
     FieldInfo,
@@ -58,5 +65,6 @@ from ._frame import Frame
 from ._geom import Box, Extent, Interval, Point, bounds
 from ._image import Image
 from ._mask import Mask, MaskPlane, MaskSchema
-from ._struct import Field, Struct
+from ._polymorphic import GetPolymorphicTag, PolymorphicAdapter, PolymorphicAdapterRegistry
+from ._struct import Field, Struct, field
 from .version import __dependency_versions__, __fingerprint__, __repo_version__, __version__

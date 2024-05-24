@@ -210,6 +210,12 @@ class Box(BaseGeometry):
 
 
 class BoundsFactory:
+    @overload
+    def __getitem__(self, key: slice) -> Interval: ...
+
+    @overload
+    def __getitem__(self, key: tuple[slice, slice]) -> Box: ...
+
     def __getitem__(self, key: slice | tuple[slice, slice]) -> Interval | Box:
         match key:
             case slice(start=start, stop=stop):

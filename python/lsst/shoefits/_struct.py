@@ -11,8 +11,9 @@
 
 from __future__ import annotations
 
-__all__ = ("Struct", "Field")
+__all__ = ("Struct", "Field", "field")
 
+import dataclasses
 from abc import ABC
 from collections.abc import Mapping
 from typing import Any, ClassVar, Self, dataclass_transform, get_type_hints
@@ -21,12 +22,23 @@ from ._field_info import FieldInfo, _build_field_info
 from ._geom import Box
 
 
+@dataclasses.dataclass
+class ReadErrorDeferred:
+    error: Exception
+
+
 class Field:
     def __init__(self, **kwargs: Any):
         self._kwargs = kwargs
 
-    def __get__(self, struct: Struct, struct_type: type[Struct] | None = None) -> Any:
-        return struct._struct_data[self._name]
+    def __get__(self, struct: Struct | None, struct_type: type[Struct]) -> Any:
+        if struct is None:
+            return self
+        result = struct._struct_data[self._name]
+        if type(result) is ReadErrorDeferred:
+            result.error.add_note(f"Trying to load attribute {struct_type.__name__}.{self._name}.")
+            raise result.error
+        return result
 
     def __set__(self, struct: Struct, value: Any) -> None:
         struct._struct_data[self._name] = value
@@ -35,7 +47,11 @@ class Field:
         self._name = name
 
 
-@dataclass_transform(eq_default=False, kw_only_default=True, field_specifiers=(Field,))
+def field(**kwargs: Any) -> Any:
+    return Field(**kwargs)
+
+
+@dataclass_transform(eq_default=False, field_specifiers=(field,))
 class Struct(ABC):
     def __new__(cls, *args: Any, **kwargs: Any) -> Self:
         self = super().__new__(cls)
@@ -48,6 +64,10 @@ class Struct(ABC):
                 self._struct_data[name] = kwargs[name]
             else:
                 self._struct_data[name] = field_info.get_default(type(self), name, bbox)
+
+    @classmethod
+    def from_box(cls, bbox: Box, **kwargs: Any) -> Self:
+        return cls(bbox, **kwargs)
 
     def __init_subclass__(cls) -> None:
         try:
