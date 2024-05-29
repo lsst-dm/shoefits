@@ -179,7 +179,6 @@ class MaskReference(pydantic.BaseModel):
     data: asdf_utils.NdArray
     start: Point
     planes: list[MaskPlane | None]
-    address: int | None = None
 
     @classmethod
     def from_mask_and_source(cls, mask: Mask, source: str | int) -> Self:
@@ -189,12 +188,3 @@ class MaskReference(pydantic.BaseModel):
             datatype=numpy_to_str(mask.array.dtype, UnsignedIntegerType),
         )
         return cls(data=result, start=mask.bbox.start, planes=list(mask._schema))
-
-    @pydantic.model_serializer(mode="wrap")
-    def _serialize(
-        self, handler: pydantic.SerializerFunctionWrapHandler, info: pydantic.SerializationInfo
-    ) -> dict[str, Any]:
-        result = handler(self)
-        if info.context is not None:
-            info.context["addressed"] = result
-        return result

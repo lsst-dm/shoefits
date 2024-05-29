@@ -20,14 +20,14 @@ import warnings
 from collections.abc import Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from io import BytesIO, TextIOWrapper
-from typing import Any, BinaryIO, Literal, TypedDict, cast
+from typing import Any, BinaryIO, Literal
 
 import astropy.io.fits
 import astropy.units
 import numpy as np
 import pydantic
 
-from . import asdf_utils
+from . import asdf_utils, keywords
 from ._compression import FitsCompression
 from ._field_info import (
     FieldInfo,
@@ -56,10 +56,6 @@ class WriteError(RuntimeError):
     pass
 
 
-class AddressedTreeData(TypedDict, total=False):
-    address: int
-
-
 class SkipNode(BaseException):
     pass
 
@@ -78,12 +74,15 @@ class FitsExtensionLabel:
     extver: int | None
     extlevel: int
 
-    @property
-    def asdf_source(self) -> str:
-        result = f"fits:{self.extname}"
+    def __str__(self) -> str:
+        result = self.extname
         if self.extver is not None:
             result = f"{result},{self.extver}"
         return result
+
+    @property
+    def asdf_source(self) -> str:
+        return f"fits:{self!s}"
 
     def update_header(self, header: astropy.io.fits.Header) -> None:
         header["EXTNAME"] = self.extname
@@ -94,11 +93,9 @@ class FitsExtensionLabel:
 
 @dataclasses.dataclass
 class FitsExtensionWriter:
-    path: Path
     parent_header: astropy.io.fits.Header | None
     extension_only_header: astropy.io.fits.Header
     array: np.ndarray
-    addressed: AddressedTreeData
     compression: FitsCompression | None = None
 
 
@@ -133,51 +130,52 @@ class Path:
 
 class FitsWriter:
     def __init__(self, struct: Struct, adapter_registry: PolymorphicAdapterRegistry):
-        self.primary_hdu = astropy.io.fits.PrimaryHDU()
-        self.primary_hdu.header.set(
-            "SHOEFITS", ".".join(str(v) for v in FORMAT_VERSION), "SHOEFITS format version."
+        self._primary_header = astropy.io.fits.Header()
+        self._primary_header.set(
+            keywords.FORMAT_VERSION, ".".join(str(v) for v in FORMAT_VERSION), "SHOEFITS format version."
         )
-        self.primary_hdu.header.set("TREEADDR", 0, "Address of JSON tree (bytes from file start).")
-        self.primary_hdu.header.set("TREESIZE", 0, "Size of JSON tree (bytes).")
-        self.extension_writers: list[FitsExtensionWriter] = []
-        self.block_writer = asdf_utils.BlockWriter()
+        self._primary_header["EXTNAME"] = "INDEX"
+        self._extension_writers: list[FitsExtensionWriter] = []
+        self._block_writer = asdf_utils.BlockWriter()
         path = Path()
         if is_frame := isinstance(struct, Frame):
             path.reset()
-        self.primary_header = astropy.io.fits.Header()
-        self.hdu_addressed: list[AddressedTreeData] = [{}]
         # Squash astropy warnings about needing HIERARCH, since the only way to
         # get it to do HIERARCH only when needed is to let it warn.
         with warnings.catch_warnings(category=astropy.io.fits.verify.VerifyWarning, action="ignore"):
-            self.tree = self._walk_struct(struct, path, header=None, is_frame=is_frame)
-        for n, block_size in enumerate(self.block_writer.sizes()):
-            self.primary_hdu.header.set(f"BLK{n:05d}", block_size, f"Size of ASDF block {n} (bytes).")
-        self.primary_hdu.header.update(self.primary_header)
+            self._tree = self._walk_struct(struct, path, header=None, is_frame=is_frame)
+        for n, block_size in enumerate(self._block_writer.sizes()):
+            self._primary_header.set(
+                keywords.ASDF_BLOCK_SIZE.format(n), block_size, f"Size of ASDF block {n} (bytes)."
+            )
         self._adapter_registry = adapter_registry
 
     def write(self, buffer: BinaryIO) -> None:
-        address = 0
-        hdu_list = astropy.io.fits.HDUList([self.primary_hdu])
+        asdf_buffer = BytesIO()
+        tree_buffer = TextIOWrapper(asdf_buffer, write_through=True)
+        json.dump(self._tree, tree_buffer, ensure_ascii=False)
+        tree_size = asdf_buffer.tell()
+        self._block_writer.write(asdf_buffer)
+        asdf_array = np.frombuffer(asdf_buffer.getbuffer(), dtype=np.int8)
+        primary_hdu = astropy.io.fits.PrimaryHDU(asdf_array, header=self._primary_header)
+        primary_hdu.header.set(keywords.TREE_SIZE, tree_size, "Size of tree in bytes.")
+        hdu_list = astropy.io.fits.HDUList([primary_hdu])
         # There's no method to get the size of the header without stringifying
-        # it, so that's what we do (here and later).  The primary header isn't
-        # actually complete - we need to fill in the TREEADDR and TREESIZE
-        # headers once we have finalized the tree.  But that shouldn't affect
-        # the header size, because we've already put those cards in with
-        # padding zeros.
-        address += len(self.primary_hdu.header.tostring())
-        for writer in self.extension_writers:
+        # it, so that's what we do (here and later).
+        address = primary_hdu.filebytes()
+        for index, writer in enumerate(self._extension_writers):
             if writer.parent_header is None:
                 full_header = astropy.io.fits.Header()
             else:
                 full_header = writer.parent_header.copy()
             full_header.set("INHERIT", True)
             full_header.update(writer.extension_only_header)
-            if compression := self.get_compression(writer.path, writer.compression, writer.array):
-                tile_shape = compression.tile_size.shape + writer.array.shape[2:]
+            if writer.compression:
+                tile_shape = writer.compression.tile_size.shape + writer.array.shape[2:]
                 hdu = astropy.io.fits.CompImageHDU(
                     writer.array,
                     header=full_header,
-                    compression_type=compression.algorithm.value,
+                    compression_type=writer.compression.algorithm.value,
                     tile_shape=tile_shape,
                 )
                 raise NotImplementedError(
@@ -186,24 +184,9 @@ class FitsWriter:
                 )
             else:
                 hdu = astropy.io.fits.ImageHDU(writer.array, full_header)
-            writer.addressed["address"] = address + len(hdu.header.tostring())
+            primary_hdu.header[keywords.EXT_ADDRESS.format(index + 1)] = address + len(hdu.header.tostring())
             address += hdu.filebytes()
             hdu_list.append(hdu)
-        tree_fits_header = astropy.io.fits.Header()
-        tree_fits_header["XTENSION"] = "IMAGE"
-        tree_fits_header["BITPIX"] = 8
-        tree_fits_header["NAXIS"] = 1
-        tree_fits_header["NAXIS1"] = 0
-        tree_fits_header["EXTNAME"] = "JSONTREE"
-        self.primary_hdu.header["TREEADDR"] = address + len(tree_fits_header.tostring())
-        asdf_buffer = BytesIO()
-        tree_buffer = TextIOWrapper(asdf_buffer, write_through=True)
-        json.dump(self.tree, tree_buffer, ensure_ascii=False)
-        tree_size = asdf_buffer.tell()
-        self.primary_hdu.header["TREESIZE"] = tree_size
-        self.block_writer.write(asdf_buffer)
-        asdf_array = np.frombuffer(asdf_buffer.getbuffer(), dtype=np.uint8)
-        hdu_list.append(astropy.io.fits.ImageHDU(asdf_array, header=tree_fits_header))
         hdu_list.writeto(buffer)  # TODO: make space for, then add checksums
 
     def get_header_key(self, path: Path, from_field: str | bool) -> str | None:
@@ -237,7 +220,11 @@ class FitsWriter:
         if field_style == "afw":
             for mask_plane_index, mask_plane in enumerate(schema):
                 if mask_plane is not None:
-                    header.set(f"MP_{mask_plane.name.upper()}", mask_plane_index, mask_plane.description)
+                    header.set(
+                        keywords.AFW_MASK_PLANE.format(mask_plane.name.upper()),
+                        mask_plane_index,
+                        mask_plane.description,
+                    )
 
     def _walk_dispatch(
         self,
@@ -282,7 +269,7 @@ class FitsWriter:
         header: astropy.io.fits.Header | None,
     ) -> JsonValue:
         if header is None:
-            header = self.primary_header
+            header = self._primary_header
         if header_key := self.get_header_key(path, field_info.fits_header):
             header.set(header_key, value, field_info.description)
         return value
@@ -292,24 +279,14 @@ class FitsWriter:
     ) -> JsonValue:
         source: int | str
         if label := self.get_extension_label(path, field_info.fits_image_extension):
-            extension_only_header = astropy.io.fits.Header()
-            if image.unit is not None:
-                extension_only_header["BUNIT"] = image.unit.to_string(format="fits")
-            label.update_header(extension_only_header)
-            self._add_array_start_wcs(image.bbox.start, extension_only_header)
-            result = ImageReference.from_image_and_source(image, label.asdf_source).model_dump()
-            self.extension_writers.append(
-                FitsExtensionWriter(
-                    path=path,
-                    array=image.array,
-                    parent_header=header,
-                    extension_only_header=extension_only_header,
-                    addressed=cast(AddressedTreeData, result),
-                )
+            writer = self._append_extension(
+                label, image.array, image.bbox.start, compression=None, parent_header=header
             )
-            return result
+            if image.unit is not None:
+                writer.extension_only_header["BUNIT"] = image.unit.to_string(format="fits")
+            return ImageReference.from_image_and_source(image, label.asdf_source).model_dump()
         else:
-            source = self.block_writer.add_array(image.array)
+            source = self._block_writer.add_array(image.array)
             return ImageReference.from_image_and_source(image, source).model_dump()
 
     def _walk_mask(
@@ -317,26 +294,18 @@ class FitsWriter:
     ) -> JsonValue:
         source: int | str
         if label := self.get_extension_label(path, field_info.fits_image_extension):
-            extension_only_header = astropy.io.fits.Header()
-            label.update_header(extension_only_header)
-            self._add_array_start_wcs(mask.bbox.start, extension_only_header)
+            writer = self._append_extension(
+                label,
+                mask.array,
+                mask.bbox.start,
+                compression=self.get_compression(path, field_info.fits_compression, mask.array),
+            )
             self.add_mask_schema_header(
-                extension_only_header, mask.schema, path, field_info.fits_plane_header_style
+                writer.extension_only_header, mask.schema, path, field_info.fits_plane_header_style
             )
-            result = MaskReference.from_mask_and_source(mask, label.asdf_source).model_dump()
-            self.extension_writers.append(
-                FitsExtensionWriter(
-                    path=path,
-                    array=mask.array,
-                    parent_header=header,
-                    extension_only_header=extension_only_header,
-                    addressed=cast(AddressedTreeData, result),
-                    compression=field_info.fits_compression,
-                )
-            )
-            return result
+            return MaskReference.from_mask_and_source(mask, label.asdf_source).model_dump()
         else:
-            source = self.block_writer.add_array(mask.array)
+            source = self._block_writer.add_array(mask.array)
             return MaskReference.from_mask_and_source(mask, source).model_dump()
 
     def _walk_struct(
@@ -392,7 +361,7 @@ class FitsWriter:
         path: Path,
         header: astropy.io.fits.Header | None,
     ) -> JsonValue:
-        context = {"block_writer": self.block_writer}
+        context = {"block_writer": self._block_writer}
         return model.model_dump(context=context)
 
     def _walk_header(
@@ -411,7 +380,7 @@ class FitsWriter:
                 )
                 header.update(value)
             raise SkipNode()
-        self.primary_header.update(value)
+        self._primary_header.update(value)
         raise SkipNode()
 
     def _walk_polymorphic(
@@ -443,3 +412,31 @@ class FitsWriter:
         header.set(f"CRVAL2{wcs_name}", start.y, "Row pixel of Reference Pixel")
         header.set(f"CUNIT1{wcs_name}", "PIXEL", "Column unit")
         header.set(f"CUNIT2{wcs_name}", "PIXEL", "Row unit")
+
+    def _append_extension(
+        self,
+        label: FitsExtensionLabel,
+        array: np.ndarray,
+        start: Point,
+        compression: FitsCompression | None = None,
+        parent_header: astropy.io.fits.Header | None = None,
+    ) -> FitsExtensionWriter:
+        extension_only_header = astropy.io.fits.Header()
+        label.update_header(extension_only_header)
+        self._add_array_start_wcs(start, extension_only_header)
+        writer = FitsExtensionWriter(
+            array=array,
+            parent_header=parent_header,
+            extension_only_header=extension_only_header,
+            compression=compression,
+        )
+        self._extension_writers.append(writer)
+        self._primary_header.set(
+            keywords.EXT_LABEL.format(len(self._extension_writers)),
+            str(label),
+            "Label for extension in tree.",
+        )
+        self._primary_header.set(
+            keywords.EXT_ADDRESS.format(len(self._extension_writers)), 0, "Address of extension data."
+        )
+        return writer

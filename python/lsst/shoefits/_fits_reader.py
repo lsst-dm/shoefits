@@ -22,7 +22,7 @@ import astropy.io.fits
 import numpy as np
 import pydantic
 
-from . import asdf_utils
+from . import asdf_utils, keywords
 from ._field_info import (
     FieldInfo,
     HeaderFieldInfo,
@@ -69,21 +69,29 @@ class FitsReader(Generic[_T]):
         self._root_type = root_type
         self._parameters = parameters or {}
         self._block_addresses: list[tuple[int, int]] = []
-        self._primary_header: astropy.io.fits.Header = astropy.io.fits.getheader(self._buffer, 0)
-        self._tree = self._read_tree_and_addresses()
+        self._ext_addresses: dict[str, int] = {}
+        self._header = astropy.io.fits.Header()
+        fits: astropy.io.fits.Header = astropy.io.fits.open(self._buffer)
+        self._read_tree_and_addresses(fits[0])
         self._adapter_registry = adapter_registry
 
-    def _read_tree_and_addresses(self) -> dict[str, JsonValue]:
-        tree_address = self._primary_header.pop("TREEADDR")
-        tree_size = self._primary_header.pop("TREESIZE")
-        self._buffer.seek(tree_address)
-        tree = json.loads(self._buffer.read(tree_size))
-        block_address = tree_address + tree_size
+    def _read_tree_and_addresses(self, hdu: astropy.io.fits.PrimaryHDU) -> None:
+        tree_size = hdu.header.pop(keywords.TREE_SIZE)
+        tree_bytes = hdu.section[:tree_size].tobytes()
+        self._tree = json.loads(tree_bytes)
+        block_address = tree_size
         n = 0
-        while (block_size := self._primary_header.pop(f"BLK{n:05d}", None)) is not None:
+        while (block_size := hdu.header.pop(keywords.ASDF_BLOCK_SIZE.format(n), None)) is not None:
             self._block_addresses.append((block_address, block_size))
             block_address += block_size
-        return tree
+            n += 1
+        n = 1
+        while (ext_addr := hdu.header.pop(keywords.EXT_ADDRESS.format(n), None)) is not None:
+            ext_label = hdu.header.pop(keywords.EXT_LABEL.format(n))
+            self._ext_addresses[ext_label] = ext_addr
+            n += 1
+        self._header.update(hdu.header)
+        self._header.strip()
 
     def read(self) -> _T:
         struct_data: dict[str, Any] = {}
@@ -147,36 +155,36 @@ class FitsReader(Generic[_T]):
             raise FileSchemaError(
                 f"Incorrect unit for image at {path}; expected {field_info.unit}, got {unit}."
             )
-        array = self._read_array(
-            array_ref, image_ref.start, address=image_ref.address, type_name=field_info.type_name, path=path
-        )
+        array = self._read_array(array_ref, image_ref.start, type_name=field_info.type_name, path=path)
         return Image(array, start=image_ref.start, size=Extent.from_shape(array.shape), unit=unit)
 
     def _read_mask(self, field_info: MaskFieldInfo, tree: dict[str, JsonValue], path: str) -> Mask:
         mask_ref = MaskReference.model_validate(tree)
         array_ref = mask_ref.data
-        array = self._read_array(
-            array_ref, mask_ref.start, address=mask_ref.address, type_name=field_info.type_name, path=path
-        )
+        array = self._read_array(array_ref, mask_ref.start, type_name=field_info.type_name, path=path)
         schema = MaskSchema(mask_ref.planes, dtype=field_info.type_name)
         return Mask(array, start=mask_ref.start, size=Extent.from_shape(array.shape), schema=schema)
 
     def _read_array(
-        self, array_ref: asdf_utils.NdArray, start: Point, address: int | None, type_name: str, path: str
+        self, array_ref: asdf_utils.NdArray, start: Point, type_name: str, path: str
     ) -> np.ndarray:
         if array_ref.datatype != type_name:
             raise FileSchemaError(
-                f"Incorrect pixel type for image at {path}; "
-                f"expected {type_name}, got {array_ref.datatype}."
+                f"Incorrect pixel type for image at {path}; expected {type_name}, got {array_ref.datatype}."
             )
-        if address is None:
-            raise FileSchemaError(f"Array address not set for {path}.")
+        match array_ref.source:
+            case str():
+                address = self._ext_addresses[array_ref.source.removeprefix("fits:")]
+            case int():
+                raise NotImplementedError("ASDF block reads not yet supported.")
+            case _:
+                raise AssertionError()
         full_bbox = Box.from_size(Extent.from_shape(array_ref.shape), start=start)
         bbox = self.get_parameter_bbox(path, full_bbox, self._parameters)
         dtype = np.dtype(array_ref.datatype).newbyteorder("B" if array_ref.byteorder == "big" else "L")
         if not full_bbox.contains(bbox):
             raise ReadError(f"Image at {path} has bbox={full_bbox}, which does not contain {bbox}.")
-        start_address = (bbox.y.start - full_bbox.y.start) * bbox.x.size * dtype.itemsize + address
+        start_address = address + (bbox.y.start - full_bbox.y.start) * bbox.x.size * dtype.itemsize
         if bbox.x == full_bbox.x:
             # We can read full rows because they're contiguous on disk.
             self._buffer.seek(start_address)
@@ -261,7 +269,7 @@ class FitsReader(Generic[_T]):
         self, field_info: HeaderFieldInfo, tree: JsonValue, path: str, frame_depth: int
     ) -> astropy.io.fits.Header:
         if frame_depth == 0:
-            return self._primary_header.copy()
+            return self._header.copy()
         return astropy.io.fits.Header()
 
     def _read_polymorphic(

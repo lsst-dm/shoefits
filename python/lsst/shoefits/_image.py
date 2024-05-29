@@ -114,7 +114,6 @@ class Image:
 class ImageReference(pydantic.BaseModel):
     data: asdf_utils.Quantity | asdf_utils.NdArray
     start: Point
-    address: int | None = None
 
     @classmethod
     def from_image_and_source(cls, image: Image, source: str | int) -> Self:
@@ -127,15 +126,6 @@ class ImageReference(pydantic.BaseModel):
                 start=image.bbox.start,
             )
         return cls(data=data, start=image.bbox.start)
-
-    @pydantic.model_serializer(mode="wrap")
-    def _serialize(
-        self, handler: pydantic.SerializerFunctionWrapHandler, info: pydantic.SerializationInfo
-    ) -> dict[str, Any]:
-        result = handler(self)
-        if info.context is not None:
-            info.context["addressed"] = result
-        return result
 
     def unpack(self) -> tuple[asdf_utils.NdArray, asdf_utils.Unit | None]:
         if isinstance(self.data, asdf_utils.Quantity):
