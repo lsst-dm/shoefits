@@ -12,25 +12,43 @@
 from __future__ import annotations
 
 __all__ = (
-    "NdArray",
-    "Quantity",
-    "BlockWriter",
+    "ArrayReader",
+    "ArrayWriter",
+    "InlineArrayModel",
+    "ArrayReferenceModel",
+    "ArrayModel",
+    "ArraySerialization",
+    "Array",
+    "QuantityModel",
     "Unit",
+    "UnitSerialization",
 )
 
+from abc import ABC, abstractmethod
 from collections.abc import Iterable
-from typing import Annotated, BinaryIO, Literal, TypeAlias
+from typing import Annotated, Any, BinaryIO, Literal, TypeAlias, Union
 
 import astropy.units
 import numpy as np
 import pydantic
+import pydantic_core.core_schema as pcs
 
-from ._dtypes import NumberType
+from ._dtypes import NumberType, numpy_to_str, str_to_numpy
 
 
-class BlockWriter:
-    """Serialization helper that gathers Numpy arrays from a Pydantic tree
-    in order to write them later to ASDF blocks.
+class ArrayWriter(ABC):
+    """Serialization helper that gathers Numpy arrays from a Struct or
+    Pydantic tree in order to write them elsewhere.
+    """
+
+    @abstractmethod
+    def add_array(self, array: np.ndarray) -> str | int:
+        raise NotImplementedError()
+
+
+class BlockArrayWriter(ArrayWriter):
+    """Implementation of ArrayWriter that writes to ASDF-style blocks just
+    after the JSON tree.
     """
 
     def __init__(self) -> None:
@@ -51,22 +69,50 @@ class BlockWriter:
         return ()
 
 
-def _deserialize_unit(value: object, handler: pydantic.ValidatorFunctionWrapHandler) -> astropy.units.Unit:
-    if isinstance(value, astropy.units.Unit):
-        return value
-    string = handler(value)
-    return astropy.units.Unit(string)
+class ArrayReader:
+    """Deserialization helper that loads arrays that have been serialized
+    outside the JSON tree.
+
+    An instance of this class should be added to the Pydantic Validation
+    Context dictionary with the "asdf_reader" key in order to allow nested
+    objects to retreive their arrays.
+    """
+
+    def get_array(self, index: int | str) -> np.ndarray:
+        raise NotImplementedError("TODO")
 
 
-def _serialize_unit(unit: astropy.units.Unit) -> str:
-    return unit.to_string("vounit")
+class UnitSerialization:
+    """Pydantic hooks for unit serialization."""
+
+    @classmethod
+    def __get_pydantic_core_schema__(
+        cls, source_type: Any, handler: pydantic.GetCoreSchemaHandler
+    ) -> pcs.CoreSchema:
+        from_str_schema = pcs.chain_schema(
+            [
+                pcs.str_schema(),
+                pcs.no_info_plain_validator_function(cls.from_str),
+            ]
+        )
+        return pcs.json_or_python_schema(
+            json_schema=from_str_schema,
+            python_schema=pcs.union_schema([pcs.is_instance_schema(astropy.units.UnitBase), from_str_schema]),
+            serialization=pcs.plain_serializer_function_ser_schema(cls.to_str),
+        )
+
+    @classmethod
+    def from_str(cls, value: str) -> astropy.units.UnitBase:
+        return astropy.units.Unit(value, format="vounit")
+
+    @staticmethod
+    def to_str(unit: astropy.units.UnitBase) -> str:
+        return unit.to_string("vounit")
 
 
 Unit: TypeAlias = Annotated[
-    astropy.units.Unit,
-    pydantic.GetPydanticSchema(lambda _, h: h(str)),
-    pydantic.WrapValidator(_deserialize_unit),
-    pydantic.PlainSerializer(_serialize_unit),
+    astropy.units.UnitBase,
+    UnitSerialization,
     pydantic.WithJsonSchema(
         {
             "type": "string",
@@ -78,8 +124,10 @@ Unit: TypeAlias = Annotated[
 ]
 
 
-class NdArray(pydantic.BaseModel):
-    """Model for the subset of the ASDF 'ndarray' schema used by shoefits."""
+class ArrayReferenceModel(pydantic.BaseModel):
+    """Model for the subset of the ASDF 'ndarray' schema used by shoefits, in
+    the case where the array data is stored elsewhere.
+    """
 
     source: str | int
     shape: tuple[int, ...]
@@ -95,10 +143,114 @@ class NdArray(pydantic.BaseModel):
     )
 
 
-class Quantity(pydantic.BaseModel):
+class InlineArrayModel(pydantic.BaseModel):
+    """Model for the subset of the ASDF 'ndarray' schema used by shoefits, in
+    the case where the array data is stored inline.
+    """
+
+    data: list[Any]
+    datatype: NumberType
+
+    model_config = pydantic.ConfigDict(
+        json_schema_extra={
+            "$schema": "http://stsci.edu/schemas/yaml-schema/draft-01",
+            "id": "http://stsci.edu/schemas/asdf/core/ndarray-1.1.0",
+            "tag": "!core/ndarray-1.1.0",
+        }
+    )
+
+
+def array_model_discriminator(obj: Any) -> str:
+    if isinstance(obj, dict):
+        return "reference" if "source" in obj else "inline"
+    return "reference" if hasattr(obj, "source") else "inline"
+
+
+ArrayModel: TypeAlias = Annotated[
+    Union[
+        Annotated[ArrayReferenceModel, pydantic.Tag("reference")],
+        Annotated[InlineArrayModel, pydantic.Tag("inline")],
+    ],
+    pydantic.Discriminator(array_model_discriminator),
+]
+
+
+ArrayModelAdapter = pydantic.TypeAdapter(ArrayModel)
+
+
+class ArraySerialization:
+    """Pydantic hooks for array serialization."""
+
+    @classmethod
+    def __get_pydantic_core_schema__(
+        cls, source_type: Any, handler: pydantic.GetCoreSchemaHandler
+    ) -> pcs.CoreSchema:
+        from_model_schema = pcs.chain_schema(
+            [
+                ArrayModelAdapter.core_schema,
+                pcs.with_info_plain_validator_function(cls.from_model),
+            ]
+        )
+        return pcs.json_or_python_schema(
+            json_schema=from_model_schema,
+            python_schema=pcs.union_schema([pcs.is_instance_schema(np.ndarray), from_model_schema]),
+            serialization=pcs.plain_serializer_function_ser_schema(cls.serialize, info_arg=True),
+        )
+
+    @classmethod
+    def from_model(cls, model: ArrayModel, info: pydantic.ValidationInfo) -> np.ndarray:
+        match model:
+            case ArrayReferenceModel(source=source):
+                reader: ArrayReader
+                if info.context is not None and (reader := info.context.get("asdf_reader")):
+                    return reader.get_array(source)
+                else:
+                    raise ValueError(
+                        "Serialized array is a reference, but no reader provided in validation context."
+                    )
+            case InlineArrayModel(data=data, datatype=datatype):
+                dtype = str_to_numpy(datatype)
+                return np.array(data, dtype=dtype)
+        raise AssertionError("Unexpected member in ArrayModel union.")
+
+    @classmethod
+    def to_model(cls, array: np.ndarray, writer: ArrayWriter | None = None) -> ArrayModel:
+        datatype = numpy_to_str(array.dtype, NumberType)
+        if writer is None:
+            return InlineArrayModel(data=array.tolist(), datatype=datatype)
+        else:
+            source = writer.add_array(array)
+            return ArrayReferenceModel(source=source, shape=array.shape, datatype=datatype)
+
+    @classmethod
+    def serialize(
+        cls,
+        array: np.ndarray,
+        info: pydantic.SerializationInfo,
+    ) -> ArrayModel:
+        writer: ArrayWriter | None = None
+        if info is not None and info.context is not None:
+            writer = info.context.get("array_writer")
+        return cls.to_model(array, writer)
+
+
+Array: TypeAlias = Annotated[
+    np.ndarray,
+    ArraySerialization,
+    pydantic.WithJsonSchema(
+        {
+            "$schema": "http://stsci.edu/schemas/yaml-schema/draft-01",
+            "id": "http://stsci.edu/schemas/asdf/core/ndarray-1.1.0",
+            "tag": "!core/ndarray-1.1.0",
+        }
+    ),
+]
+
+
+class QuantityModel(pydantic.BaseModel):
     """Model for the subset of the ASDF 'quantity' schema used by shoefits."""
 
-    value: NdArray
+    value: ArrayModel
     unit: Unit
 
     model_config = pydantic.ConfigDict(

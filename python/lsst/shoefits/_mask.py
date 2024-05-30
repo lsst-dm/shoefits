@@ -16,7 +16,7 @@ __all__ = ("Mask", "MaskPlane", "MaskSchema", "MaskReference")
 import dataclasses
 import math
 from collections.abc import Iterable, Iterator, Mapping
-from typing import Any, Self, cast
+from typing import Any, cast
 
 import numpy as np
 import numpy.typing as npt
@@ -24,7 +24,6 @@ import pydantic
 import pydantic_core.core_schema as pcs
 
 from . import asdf_utils
-from ._dtypes import UnsignedIntegerType, numpy_to_str
 from ._geom import Box, Extent, Point
 
 
@@ -157,13 +156,13 @@ class Mask:
 
     @classmethod
     def _from_reference(cls, reference: MaskReference, info: pydantic.ValidationInfo) -> Mask:
-        raise NotImplementedError()
+        array = asdf_utils.ArraySerialization.from_model(reference.data, info)
+        schema = MaskSchema(reference.planes, dtype=array.dtype)
+        return cls(array, start=reference.start, schema=schema)
 
     def _serialize(self, info: pydantic.SerializationInfo) -> MaskReference:
-        if info.context is None or "block_writer" not in info.context:
-            raise NotImplementedError("Inline arrays not yet supported.")
-        writer: asdf_utils.BlockWriter = info.context["block_writer"]
-        return MaskReference.from_mask_and_source(self, writer.add_array(self.array))
+        data = asdf_utils.ArraySerialization.serialize(self.array, info)
+        return MaskReference(data=data, start=self.bbox.start, planes=list(self.schema))
 
     @classmethod
     def __get_pydantic_json_schema__(
@@ -176,15 +175,6 @@ class Mask:
 
 
 class MaskReference(pydantic.BaseModel):
-    data: asdf_utils.NdArray
+    data: asdf_utils.ArrayModel
     start: Point
     planes: list[MaskPlane | None]
-
-    @classmethod
-    def from_mask_and_source(cls, mask: Mask, source: str | int) -> Self:
-        result = asdf_utils.NdArray(
-            source=source,
-            shape=mask.bbox.size.shape + (mask._schema.mask_size,),
-            datatype=numpy_to_str(mask.array.dtype, UnsignedIntegerType),
-        )
-        return cls(data=result, start=mask.bbox.start, planes=list(mask._schema))

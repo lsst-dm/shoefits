@@ -29,10 +29,10 @@ from collections.abc import Callable, Mapping, Sequence
 from typing import TYPE_CHECKING, Any, Literal, TypeAlias, TypeVar, Union, cast, final, get_args, get_origin
 
 import astropy.io.fits
+import astropy.units
 import numpy.typing as npt
 import pydantic
 
-from . import asdf_utils
 from ._compression import FitsCompression
 from ._dtypes import NumberType, UnsignedIntegerType, ValueType, numpy_to_str
 from ._geom import Box
@@ -70,7 +70,7 @@ class FieldInfoBase:
 @dataclasses.dataclass(kw_only=True)
 class ValueFieldInfo(FieldInfoBase):
     type_name: ValueType
-    unit: asdf_utils.Unit | None = None
+    unit: astropy.units.Unit | None = None
     fits_header: bool | str = False
     default: int | str | float | None = None
 
@@ -80,12 +80,15 @@ class ValueFieldInfo(FieldInfoBase):
         name: str,
         struct_type: type[Struct],
         annotation: type[object],
+        unit: astropy.units.Unit | str | None = None,
         **kwargs: Any,
     ) -> ValueFieldInfo:
         if annotation not in (int, str, float):
             raise TypeError(
                 f"Invalid type {annotation.__name__} for value field {struct_type.__name__}.{name}."
             )
+        if unit is not None:
+            unit = astropy.units.Unit(unit)
         return cls(type_name=cast(ValueType, annotation.__name__), **kwargs)
 
     @pydantic.model_validator(mode="after")
@@ -104,7 +107,7 @@ class ValueFieldInfo(FieldInfoBase):
 @dataclasses.dataclass(kw_only=True)
 class ImageFieldInfo(FieldInfoBase):
     type_name: NumberType
-    unit: asdf_utils.Unit | None = None
+    unit: astropy.units.Unit | None = None
     use_parent_bbox: bool = True
     fits_image_extension: bool | str = True
     default: int | float | None
@@ -118,6 +121,7 @@ class ImageFieldInfo(FieldInfoBase):
         *,
         dtype: npt.DTypeLike,
         allow_none: bool = False,
+        unit: astropy.units.Unit | str | None = None,
         **kwargs: Any,
     ) -> ImageFieldInfo:
         type_name = numpy_to_str(dtype, NumberType)
@@ -125,6 +129,8 @@ class ImageFieldInfo(FieldInfoBase):
         # is not allowed.
         if "default" not in kwargs and not allow_none:
             kwargs["default"] = 0
+        if unit is not None:
+            unit = astropy.units.Unit(unit)
         return cls(type_name=type_name, allow_none=allow_none, **kwargs)
 
     def get_default(self, struct_type: type[Struct], name: str, parent_bbox: Box | None) -> Any:

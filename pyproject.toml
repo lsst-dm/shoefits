@@ -37,6 +37,7 @@ dynamic = ["version"]
 [project.optional-dependencies]
 test = [
     "pytest >= 8.2",
+    "jsonschema >= 4.20",
 ]
 # Also expose the optional dependencies of lsst-resources as optional
 # dependencies.  This package doesn't care what resource methods are available,

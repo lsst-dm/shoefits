@@ -13,7 +13,7 @@ from __future__ import annotations
 
 __all__ = ("Image", "ImageReference")
 
-from typing import Any, Self, cast
+from typing import Any, cast
 
 import astropy.units
 import numpy as np
@@ -22,7 +22,6 @@ import pydantic
 import pydantic_core.core_schema as pcs
 
 from . import asdf_utils
-from ._dtypes import NumberType, numpy_to_str
 from ._geom import Box, Extent, Point
 
 
@@ -96,13 +95,13 @@ class Image:
 
     @classmethod
     def _from_reference(cls, reference: ImageReference, info: pydantic.ValidationInfo) -> Image:
-        raise NotImplementedError()
+        array_model, unit = reference.unpack()
+        array = asdf_utils.ArraySerialization.from_model(array_model, info)
+        return cls(array, start=reference.start, unit=unit)
 
     def _serialize(self, info: pydantic.SerializationInfo) -> ImageReference:
-        if info.context is None or "block_writer" not in info.context:
-            raise NotImplementedError("Inline arrays not yet supported.")
-        writer: asdf_utils.BlockWriter = info.context["block_writer"]
-        return ImageReference.from_image_and_source(self, writer.add_array(self.array))
+        data = asdf_utils.ArraySerialization.serialize(self.array, info)
+        return ImageReference.pack(data, self.bbox.start, self.unit)
 
     @classmethod
     def __get_pydantic_json_schema__(
@@ -112,22 +111,20 @@ class Image:
 
 
 class ImageReference(pydantic.BaseModel):
-    data: asdf_utils.Quantity | asdf_utils.NdArray
+    data: asdf_utils.QuantityModel | asdf_utils.ArrayModel
     start: Point
 
     @classmethod
-    def from_image_and_source(cls, image: Image, source: str | int) -> Self:
-        data = asdf_utils.NdArray(
-            source=source, shape=image.bbox.size.shape, datatype=numpy_to_str(image.array.dtype, NumberType)
+    def pack(
+        cls, array_model: asdf_utils.ArrayModel, start: Point, unit: asdf_utils.Unit | None
+    ) -> ImageReference:
+        if unit is None:
+            return cls.model_construct(data=array_model, start=start)
+        return cls.model_construct(
+            data=asdf_utils.QuantityModel.model_construct(data=array_model, unit=unit), start=start
         )
-        if image.unit is not None:
-            return cls(
-                data=asdf_utils.Quantity(value=data, unit=image.unit),
-                start=image.bbox.start,
-            )
-        return cls(data=data, start=image.bbox.start)
 
-    def unpack(self) -> tuple[asdf_utils.NdArray, asdf_utils.Unit | None]:
-        if isinstance(self.data, asdf_utils.Quantity):
+    def unpack(self) -> tuple[asdf_utils.ArrayModel, asdf_utils.Unit | None]:
+        if isinstance(self.data, asdf_utils.QuantityModel):
             return self.data.value, self.data.unit
         return self.data, None

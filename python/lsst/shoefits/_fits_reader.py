@@ -150,51 +150,53 @@ class FitsReader(Generic[_T]):
 
     def _read_image(self, field_info: ImageFieldInfo, tree: dict[str, JsonValue], path: str) -> Image:
         image_ref = ImageReference.model_validate(tree)
-        array_ref, unit = image_ref.unpack()
+        array_model, unit = image_ref.unpack()
         if unit != field_info.unit:
             raise FileSchemaError(
                 f"Incorrect unit for image at {path}; expected {field_info.unit}, got {unit}."
             )
-        array = self._read_array(array_ref, image_ref.start, type_name=field_info.type_name, path=path)
+        array = self._read_array(array_model, image_ref.start, type_name=field_info.type_name, path=path)
         return Image(array, start=image_ref.start, size=Extent.from_shape(array.shape), unit=unit)
 
     def _read_mask(self, field_info: MaskFieldInfo, tree: dict[str, JsonValue], path: str) -> Mask:
         mask_ref = MaskReference.model_validate(tree)
-        array_ref = mask_ref.data
-        array = self._read_array(array_ref, mask_ref.start, type_name=field_info.type_name, path=path)
+        array_model = mask_ref.data
+        array = self._read_array(array_model, mask_ref.start, type_name=field_info.type_name, path=path)
         schema = MaskSchema(mask_ref.planes, dtype=field_info.type_name)
         return Mask(array, start=mask_ref.start, size=Extent.from_shape(array.shape), schema=schema)
 
     def _read_array(
-        self, array_ref: asdf_utils.NdArray, start: Point, type_name: str, path: str
+        self, array_model: asdf_utils.ArrayModel, start: Point, type_name: str, path: str
     ) -> np.ndarray:
-        if array_ref.datatype != type_name:
+        if array_model.datatype != type_name:
             raise FileSchemaError(
-                f"Incorrect pixel type for image at {path}; expected {type_name}, got {array_ref.datatype}."
+                f"Incorrect pixel type for image at {path}; expected {type_name}, got {array_model.datatype}."
             )
-        match array_ref.source:
-            case str():
-                address = self._ext_addresses[array_ref.source.removeprefix("fits:")]
-            case int():
+        match array_model:
+            case asdf_utils.ArrayReferenceModel(source=str(fits_source)):
+                address = self._ext_addresses[fits_source.removeprefix("fits:")]
+            case asdf_utils.ArrayReferenceModel(source=int()):
                 raise NotImplementedError("ASDF block reads not yet supported.")
+            case asdf_utils.InlineArrayModel(data=data):
+                return np.ndarray(data)
             case _:
                 raise AssertionError()
-        full_bbox = Box.from_size(Extent.from_shape(array_ref.shape), start=start)
+        full_bbox = Box.from_size(Extent.from_shape(array_model.shape), start=start)
         bbox = self.get_parameter_bbox(path, full_bbox, self._parameters)
-        dtype = np.dtype(array_ref.datatype).newbyteorder("B" if array_ref.byteorder == "big" else "L")
+        dtype = np.dtype(array_model.datatype).newbyteorder("B" if array_model.byteorder == "big" else "L")
         if not full_bbox.contains(bbox):
             raise ReadError(f"Image at {path} has bbox={full_bbox}, which does not contain {bbox}.")
         start_address = address + (bbox.y.start - full_bbox.y.start) * bbox.x.size * dtype.itemsize
         if bbox.x == full_bbox.x:
             # We can read full rows because they're contiguous on disk.
             self._buffer.seek(start_address)
-            array1d = np.fromfile(self._buffer, dtype=dtype, offset=0, count=math.prod(array_ref.shape))
-            array = array1d.reshape(*array_ref.shape)
+            array1d = np.fromfile(self._buffer, dtype=dtype, offset=0, count=math.prod(array_model.shape))
+            array = array1d.reshape(*array_model.shape)
         else:
             # Read row-by-row.  We don't do any clever caching or buffering
             # because we're *hoping* that's best left to the file-like object
             # we're passed.
-            array = np.zeros(array_ref.shape, dtype=dtype)
+            array = np.zeros(array_model.shape, dtype=dtype)
             start_address += (bbox.x.start - full_bbox.x.start) * dtype.itemsize
             self._buffer.seek(start_address)
             stride = full_bbox.x.size * dtype.itemsize

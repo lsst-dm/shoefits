@@ -80,10 +80,6 @@ class FitsExtensionLabel:
             result = f"{result},{self.extver}"
         return result
 
-    @property
-    def asdf_source(self) -> str:
-        return f"fits:{self!s}"
-
     def update_header(self, header: astropy.io.fits.Header) -> None:
         header["EXTNAME"] = self.extname
         if self.extver is not None:
@@ -97,6 +93,22 @@ class FitsExtensionWriter:
     extension_only_header: astropy.io.fits.Header
     array: np.ndarray
     compression: FitsCompression | None = None
+
+
+class FitsArrayWriter(asdf_utils.ArrayWriter):
+    def __init__(self, label: FitsExtensionLabel):
+        self.label = f"fits:{label!s}"
+        self._array: np.ndarray | None = None
+
+    def add_array(self, array: np.ndarray) -> str:
+        assert self._array is None, "FitsArrayWriter is single-use."
+        self._array = array
+        return self.label
+
+    @property
+    def array(self) -> np.ndarray:
+        assert self._array is not None, "FitsArrayWriter should have been used exactly once."
+        return self._array
 
 
 @dataclasses.dataclass(frozen=True)
@@ -136,7 +148,7 @@ class FitsWriter:
         )
         self._primary_header["EXTNAME"] = "INDEX"
         self._extension_writers: list[FitsExtensionWriter] = []
-        self._block_writer = asdf_utils.BlockWriter()
+        self._block_writer = asdf_utils.BlockArrayWriter()
         path = Path()
         if is_frame := isinstance(struct, Frame):
             path.reset()
@@ -277,36 +289,40 @@ class FitsWriter:
     def _walk_image(
         self, image: Image, field_info: ImageFieldInfo, path: Path, header: astropy.io.fits.Header | None
     ) -> JsonValue:
-        source: int | str
         if label := self.get_extension_label(path, field_info.fits_image_extension):
-            writer = self._append_extension(
-                label, image.array, image.bbox.start, compression=None, parent_header=header
+            array_writer = FitsArrayWriter(label)
+            array_model = asdf_utils.ArraySerialization.to_model(image.array, writer=array_writer)
+            ext_writer = self._append_extension(
+                label, array_writer.array, image.bbox.start, compression=None, parent_header=header
             )
             if image.unit is not None:
-                writer.extension_only_header["BUNIT"] = image.unit.to_string(format="fits")
-            return ImageReference.from_image_and_source(image, label.asdf_source).model_dump()
-        else:
-            source = self._block_writer.add_array(image.array)
-            return ImageReference.from_image_and_source(image, source).model_dump()
+                ext_writer.extension_only_header["BUNIT"] = image.unit.to_string(format="fits")
+        else:  # TODO: also support in-line arrays via FieldInfo
+            array_model = asdf_utils.ArraySerialization.to_model(image.array, writer=self._block_writer)
+        return ImageReference.pack(
+            array_model,
+            start=image.bbox.start,
+            unit=image.unit,
+        ).model_dump()
 
     def _walk_mask(
         self, mask: Mask, field_info: MaskFieldInfo, path: Path, header: astropy.io.fits.Header | None
     ) -> JsonValue:
-        source: int | str
         if label := self.get_extension_label(path, field_info.fits_image_extension):
-            writer = self._append_extension(
+            array_writer = FitsArrayWriter(label)
+            array_model = asdf_utils.ArraySerialization.to_model(mask.array, writer=array_writer)
+            ext_writer = self._append_extension(
                 label,
-                mask.array,
+                array_writer.array,
                 mask.bbox.start,
                 compression=self.get_compression(path, field_info.fits_compression, mask.array),
             )
             self.add_mask_schema_header(
-                writer.extension_only_header, mask.schema, path, field_info.fits_plane_header_style
+                ext_writer.extension_only_header, mask.schema, path, field_info.fits_plane_header_style
             )
-            return MaskReference.from_mask_and_source(mask, label.asdf_source).model_dump()
-        else:
-            source = self._block_writer.add_array(mask.array)
-            return MaskReference.from_mask_and_source(mask, source).model_dump()
+        else:  # TODO: also support in-line arrays via FieldInfo
+            array_model = asdf_utils.ArraySerialization.to_model(mask.array, writer=self._block_writer)
+        return MaskReference(data=array_model, start=mask.bbox.start, planes=list(mask.schema)).model_dump()
 
     def _walk_struct(
         self,
