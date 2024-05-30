@@ -85,7 +85,7 @@ class ValueFieldInfo(FieldInfoBase):
         unit: astropy.units.Unit | str | None = None,
         **kwargs: Any,
     ) -> ValueFieldInfo:
-        if annotation not in (int, str, float):
+        if annotation not in (int, str, float, bool):
             raise TypeError(
                 f"Invalid type {annotation.__name__} for value field {struct_type.__name__}.{name}."
             )

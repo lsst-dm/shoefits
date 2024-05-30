@@ -59,4 +59,4 @@ def numpy_to_str(dtype: npt.DTypeLike, kind: Any) -> Any:
     return result
 
 
-ValueType: TypeAlias = Literal["int", "str", "float"]
+ValueType: TypeAlias = Literal["int", "str", "float", "bool"]
