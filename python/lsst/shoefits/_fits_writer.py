@@ -266,7 +266,7 @@ class FitsWriter:
             case SequenceFieldInfo():
                 return self._walk_sequence(value, field_info, path, header)
             case ModelFieldInfo():
-                return self._walk_model(value, field_info, path, header)
+                return self._walk_model(value)
             case HeaderFieldInfo():
                 return self._walk_header(value, field_info, path, header)
             case PolymorphicFieldInfo():
@@ -370,13 +370,7 @@ class FitsWriter:
                 result.append(self._walk_dispatch(value, field_info.value, path.push(index), header))
         return result
 
-    def _walk_model(
-        self,
-        model: pydantic.BaseModel,
-        field_info: ModelFieldInfo,
-        path: Path,
-        header: astropy.io.fits.Header | None,
-    ) -> JsonValue:
+    def _walk_model(self, model: pydantic.BaseModel) -> dict[str, JsonValue]:
         context = {"block_writer": self._block_writer}
         return model.model_dump(context=context)
 
@@ -408,10 +402,13 @@ class FitsWriter:
     ) -> JsonValue:
         tag = field_info.get_tag(obj)
         adapter = self._adapter_registry[tag]
-        struct = adapter.to_struct(obj)
-        if is_frame := isinstance(struct, Frame):
-            path = path.reset()
-        data = self._walk_struct(struct, path, header, is_frame=is_frame)
+        serialized = adapter.to_serialized(obj)
+        if isinstance(serialized, Struct):
+            if is_frame := isinstance(serialized, Frame):
+                path = path.reset()
+            data = self._walk_struct(serialized, path, header, is_frame=is_frame)
+        elif isinstance(serialized, pydantic.BaseModel):
+            data = self._walk_model(serialized)
         if data.setdefault("tag", tag) != tag:
             raise WriteError(
                 f"Serialized form of {path} already has tag={data['tag']!r}, "

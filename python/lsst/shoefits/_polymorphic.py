@@ -22,19 +22,16 @@ __all__ = (
 import os
 from abc import abstractmethod
 from collections.abc import Callable
-from typing import TYPE_CHECKING, Any, Generic, Protocol, TypeAlias, TypeVar, final, overload
+from typing import Any, Generic, Protocol, TypeAlias, TypeVar, final, overload
 
 import pydantic
 
 from lsst.resources import ResourcePath
 from lsst.utils.doImport import doImportType
 
-if TYPE_CHECKING:
-    from ._struct import Struct
-
 _C = TypeVar("_C", bound=type[Any])
 _T = TypeVar("_T")
-_S = TypeVar("_S", bound="Struct")
+_S = TypeVar("_S")
 
 
 CONFIGS_ENVVAR: str = "SHOEFITS_ADAPTER_CONFIGS"
@@ -89,15 +86,15 @@ AdapterConfig: TypeAlias = str | AdapterFactory
 class PolymorphicAdapter(Generic[_T, _S]):
     @property
     @abstractmethod
-    def struct_type(self) -> type[_S]:
+    def serialized_type(self) -> type[_S]:
         raise NotImplementedError()
 
     @abstractmethod
-    def to_struct(self, polymorphic: _T) -> _S:
+    def to_serialized(self, polymorphic: _T) -> _S:
         raise NotImplementedError()
 
     @abstractmethod
-    def from_struct(self, struct: _S) -> _T:
+    def from_serialized(self, struct: _S) -> _T:
         raise NotImplementedError()
 
 

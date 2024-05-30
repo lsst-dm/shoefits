@@ -295,13 +295,18 @@ class SequenceFieldInfo(FieldInfoBase):
 @dataclasses.dataclass(kw_only=True)
 class ModelFieldInfo(FieldInfoBase):
     cls: type[pydantic.BaseModel]
-    default_factory: Callable[[Box | None], pydantic.BaseModel] | None
+    default_factory: Callable[[], pydantic.BaseModel] | None
 
     @classmethod
     def build(
         cls, name: str, struct_type: type[Struct], annotation: type[pydantic.BaseModel], **kwargs: Any
     ) -> ModelFieldInfo:
         return cls(cls=annotation, **kwargs)
+
+    def get_default(self, struct_type: type[Struct], name: str, parent_bbox: Box | None) -> Any:
+        if self.default_factory is not None:
+            return self.default_factory()
+        return super().get_default(struct_type, name, parent_bbox)
 
 
 @final
@@ -313,6 +318,11 @@ class HeaderFieldInfo(FieldInfoBase):
     ) -> HeaderFieldInfo:
         return cls(**kwargs)
 
+    def get_default(
+        self, struct_type: type[Struct], name: str, parent_bbox: Box | None
+    ) -> astropy.io.fits.Header:
+        return astropy.io.fits.Header()
+
 
 @final
 @dataclasses.dataclass(kw_only=True)
@@ -320,7 +330,7 @@ class PolymorphicFieldInfo(FieldInfoBase):
     get_tag: GetPolymorphicTag
     on_load_failure: Literal["raise", "warn", "ignore"] = "ignore"
     use_parent_bbox: bool = True
-    default_factory: Callable[[Box | None], Struct] | None
+    default_factory: Callable[[Box | None], Any] | None
 
     @classmethod
     def build(
@@ -337,19 +347,6 @@ class PolymorphicFieldInfo(FieldInfoBase):
         if get_tag is None:
             get_tag = get_tag_from_registry
         return cls(get_tag=get_tag, **kwargs)
-
-    def as_struct(self, struct_type: type[Struct]) -> StructFieldInfo:
-        from ._frame import Frame
-
-        return StructFieldInfo(
-            description=self.description,
-            allow_none=self.allow_none,
-            on_load_failure=self.on_load_failure,
-            cls=struct_type,
-            is_frame=issubclass(struct_type, Frame),
-            use_parent_bbox=self.use_parent_bbox,
-            default_factory=self.default_factory,
-        )
 
 
 FieldInfo: TypeAlias = Union[

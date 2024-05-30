@@ -35,6 +35,7 @@ from ._field_info import (
     StructFieldInfo,
     ValueFieldInfo,
 )
+from ._frame import Frame
 from ._geom import Box, Extent, Point
 from ._image import Image, ImageReference
 from ._mask import Mask, MaskReference, MaskSchema
@@ -137,13 +138,13 @@ class FitsReader(Generic[_T]):
             case MaskFieldInfo():
                 return self._read_mask(field_info, tree, path)
             case StructFieldInfo():
-                return self._read_struct(field_info, tree, path, frame_depth, target)
+                return self._read_struct(field_info.cls, field_info.is_frame, tree, path, frame_depth, target)
             case MappingFieldInfo():
                 return self._read_mapping(field_info, tree, path, frame_depth, target)
             case SequenceFieldInfo():
                 return self._read_sequence(field_info, tree, path, frame_depth, target)
             case ModelFieldInfo():
-                return self._read_model(field_info, tree, path)
+                return self._read_model(field_info.cls, tree, path)
             case HeaderFieldInfo():
                 return self._read_header(field_info, tree, path, frame_depth)
         raise AssertionError()
@@ -208,25 +209,26 @@ class FitsReader(Generic[_T]):
 
     def _read_struct(
         self,
-        field_info: StructFieldInfo,
+        struct_type: type[Struct],
+        is_frame: bool,
         tree: dict[str, JsonValue],
         path: str,
         frame_depth: int,
         target: list[str] | None,
     ) -> Any:
         struct_data: dict[str, Any] = {}
-        if field_info.is_frame:
+        if is_frame:
             frame_depth += 1
         if target is not None:
             name = target.pop()
             return self._read_dispatch(
-                field_info.cls.struct_fields[name], tree[name], f"{path}/{name}", frame_depth, target
+                struct_type.struct_fields[name], tree[name], f"{path}/{name}", frame_depth, target
             )
-        for name, nested_field_info in field_info.cls.struct_fields.items():
+        for name, nested_field_info in struct_type.struct_fields.items():
             struct_data[name] = self._read_dispatch(
                 nested_field_info, tree[name], f"{path}/{name}", frame_depth, target
             )
-        return field_info.cls._from_struct_data(struct_data)
+        return struct_type._from_struct_data(struct_data)
 
     def _read_mapping(
         self,
@@ -264,8 +266,8 @@ class FitsReader(Generic[_T]):
             )
         return field_info.load_factory(load_data)
 
-    def _read_model(self, field_info: ModelFieldInfo, tree: Any, path: str) -> pydantic.BaseModel:
-        return field_info.cls.model_validate(tree)
+    def _read_model(self, model_type: type[pydantic.BaseModel], tree: Any, path: str) -> pydantic.BaseModel:
+        return model_type.model_validate(tree)
 
     def _read_header(
         self, field_info: HeaderFieldInfo, tree: JsonValue, path: str, frame_depth: int
@@ -282,8 +284,25 @@ class FitsReader(Generic[_T]):
                 pass
             case _:
                 raise ReadError(f"No string 'tag' entry found for polymorphic field at {path}.")
-        adapter: PolymorphicAdapter[Any, Struct] = self._adapter_registry[tag]
-        if "tag" not in adapter.struct_type.struct_fields:
-            del tree["tag"]
-        struct = self._read_struct(field_info.as_struct(adapter.struct_type), tree, path, frame_depth, None)
-        return adapter.from_struct(struct)
+        adapter: PolymorphicAdapter[Any, Struct | pydantic.BaseModel] = self._adapter_registry[tag]
+        if issubclass(adapter.serialized_type, Struct):
+            if "tag" not in adapter.serialized_type.struct_fields:
+                del tree["tag"]
+            serialized = self._read_struct(
+                adapter.serialized_type,
+                isinstance(adapter.serialized_type, Frame),
+                tree,
+                path,
+                frame_depth,
+                None,
+            )
+        elif issubclass(adapter.serialized_type, pydantic.BaseModel):
+            if "tag" not in adapter.serialized_type.model_fields:
+                del tree["tag"]
+            serialized = self._read_model(adapter.serialized_type, tree, path)
+        else:
+            raise ReadError(
+                f"Unsupported serialized type {adapter.serialized_type.__name__} "
+                f"for polymorphic object at {path}."
+            )
+        return adapter.from_serialized(serialized)
