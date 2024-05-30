@@ -36,6 +36,7 @@ __all__ = (
     "MaskPlane",
     "MaskSchema",
     "ModelFieldInfo",
+    "no_bbox",
     "Point",
     "PolymorphicAdapter",
     "PolymorphicAdapterRegistry",
@@ -59,6 +60,7 @@ from ._field_info import (
     SequenceFieldInfo,
     StructFieldInfo,
     ValueFieldInfo,
+    no_bbox,
 )
 from ._fits_writer import FORMAT_VERSION, FitsWriter
 from ._frame import Frame

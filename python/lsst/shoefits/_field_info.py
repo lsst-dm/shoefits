@@ -22,7 +22,9 @@ __all__ = (
     "HeaderFieldInfo",
     "PolymorphicFieldInfo",
     "FieldInfo",
+    "no_bbox",
 )
+
 import dataclasses
 import types
 from collections.abc import Callable, Mapping, Sequence
