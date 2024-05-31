@@ -187,7 +187,7 @@ class StructFieldInfo(FieldInfoBase):
     cls: type[Struct]
     is_frame: bool
     use_parent_bbox: bool = True
-    default_factory: Callable[[Box | None], Struct] | None
+    default_factory: Callable[[Box | None], Struct] | None = None
 
     @classmethod
     def build(
@@ -195,16 +195,10 @@ class StructFieldInfo(FieldInfoBase):
         name: str,
         struct_type: type[Struct],
         annotation: type[Struct],
-        *,
-        allow_none: bool = False,
         **kwargs: Any,
     ) -> StructFieldInfo:
         from ._frame import Frame
 
-        if "default_factory" not in kwargs and not allow_none:
-            # If we weren't given a default_factory and can't initialize to
-            # None, try to use the class constructor as the default factory.
-            kwargs["default_factory"] = kwargs["cls"]
         return cls(cls=annotation, is_frame=issubclass(annotation, Frame), **kwargs)
 
     def get_default(self, struct_type: type[Struct], name: str, parent_bbox: Box | None) -> Any:
@@ -297,7 +291,7 @@ class SequenceFieldInfo(FieldInfoBase):
 @dataclasses.dataclass(kw_only=True)
 class ModelFieldInfo(FieldInfoBase):
     cls: type[pydantic.BaseModel]
-    default_factory: Callable[[], pydantic.BaseModel] | None
+    default_factory: Callable[[], pydantic.BaseModel] | None = None
 
     @classmethod
     def build(
@@ -331,7 +325,7 @@ class HeaderFieldInfo(FieldInfoBase):
 class PolymorphicFieldInfo(FieldInfoBase):
     get_tag: GetPolymorphicTag
     on_load_failure: Literal["raise", "warn", "ignore"] = "ignore"
-    default_factory: Callable[[], Any] | None
+    default_factory: Callable[[], Any] | None = None
 
     @classmethod
     def build(
