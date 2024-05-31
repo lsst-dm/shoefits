@@ -45,7 +45,7 @@ from ._frame import Frame
 from ._geom import Point
 from ._image import Image, ImageReference
 from ._mask import Mask, MaskReference, MaskSchema
-from ._polymorphic import PolymorphicAdapterRegistry
+from ._polymorphic import Polymorphic, PolymorphicAdapterRegistry
 from ._struct import Struct
 from .json_utils import JsonValue
 
@@ -270,7 +270,7 @@ class FitsWriter:
             case HeaderFieldInfo():
                 return self._walk_header(value, field_info, path, header)
             case PolymorphicFieldInfo():
-                return self._walk_polymorphic(value, field_info, path, header)
+                return self._walk_polymorphic(value, field_info)
         raise AssertionError()
 
     def _walk_value(
@@ -393,28 +393,10 @@ class FitsWriter:
         self._primary_header.update(value)
         raise SkipNode()
 
-    def _walk_polymorphic(
-        self,
-        obj: Any,
-        field_info: PolymorphicFieldInfo,
-        path: Path,
-        header: astropy.io.fits.Header | None,
-    ) -> JsonValue:
-        tag = field_info.get_tag(obj)
-        adapter = self._adapter_registry[tag]
-        serialized = adapter.to_serialized(obj)
-        if isinstance(serialized, Struct):
-            if is_frame := isinstance(serialized, Frame):
-                path = path.reset()
-            data = self._walk_struct(serialized, path, header, is_frame=is_frame)
-        elif isinstance(serialized, pydantic.BaseModel):
-            data = self._walk_model(serialized)
-        if data.setdefault("tag", tag) != tag:
-            raise WriteError(
-                f"Serialized form of {path} already has tag={data['tag']!r}, "
-                f"which is inconsistent with tag={tag!r} from the get_tag callback."
-            )
-        return data
+    def _walk_polymorphic(self, obj: Any, field_info: PolymorphicFieldInfo) -> JsonValue:
+        return Polymorphic(field_info.get_tag).to_tree(
+            obj, adapter_registry=self._adapter_registry, array_writer=self._block_writer
+        )
 
     def _add_array_start_wcs(self, start: Point, header: astropy.io.fits.Header, wcs_name: str = "A") -> None:
         header.set(f"CTYPE1{wcs_name}", "LINEAR", "Type of projection")

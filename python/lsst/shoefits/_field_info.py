@@ -331,8 +331,7 @@ class HeaderFieldInfo(FieldInfoBase):
 class PolymorphicFieldInfo(FieldInfoBase):
     get_tag: GetPolymorphicTag
     on_load_failure: Literal["raise", "warn", "ignore"] = "ignore"
-    use_parent_bbox: bool = True
-    default_factory: Callable[[Box | None], Any] | None
+    default_factory: Callable[[], Any] | None
 
     @classmethod
     def build(
@@ -349,6 +348,11 @@ class PolymorphicFieldInfo(FieldInfoBase):
         if get_tag is None:
             get_tag = get_tag_from_registry
         return cls(get_tag=get_tag, **kwargs)
+
+    def get_default(self, struct_type: type[Struct], name: str, parent_bbox: Box | None) -> Any:
+        if self.default_factory is not None:
+            return self.default_factory()
+        return super().get_default(struct_type, name, parent_bbox)
 
 
 FieldInfo: TypeAlias = Union[

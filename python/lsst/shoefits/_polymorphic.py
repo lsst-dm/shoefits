@@ -15,6 +15,9 @@ __all__ = (
     "PolymorphicAdapter",
     "PolymorphicAdapterRegistry",
     "GetPolymorphicTag",
+    "PolymorphicReadError",
+    "PolymorphicWriteError",
+    "Polymorphic",
     "register_tag",
     "get_tag_from_registry",
 )
@@ -22,16 +25,23 @@ __all__ = (
 import os
 from abc import abstractmethod
 from collections.abc import Callable
-from typing import Any, Generic, Protocol, TypeAlias, TypeVar, final, overload
+from typing import TYPE_CHECKING, Any, Generic, Protocol, TypeAlias, TypeVar, final, overload
 
 import pydantic
+import pydantic_core.core_schema as pcs
 
 from lsst.resources import ResourcePath
 from lsst.utils.doImport import doImportType
 
+from .json_utils import JsonValue
+
+if TYPE_CHECKING:
+    from . import asdf_utils
+
+
 _C = TypeVar("_C", bound=type[Any])
 _T = TypeVar("_T")
-_S = TypeVar("_S")
+_S = TypeVar("_S", bound=pydantic.BaseModel)
 
 
 CONFIGS_ENVVAR: str = "SHOEFITS_ADAPTER_CONFIGS"
@@ -86,16 +96,31 @@ AdapterConfig: TypeAlias = str | AdapterFactory
 class PolymorphicAdapter(Generic[_T, _S]):
     @property
     @abstractmethod
-    def serialized_type(self) -> type[_S]:
+    def model_type(self) -> type[_S]:
         raise NotImplementedError()
 
     @abstractmethod
-    def to_serialized(self, polymorphic: _T) -> _S:
+    def to_model(self, polymorphic: _T) -> _S:
         raise NotImplementedError()
 
     @abstractmethod
-    def from_serialized(self, struct: _S) -> _T:
+    def from_model(self, model: _S) -> _T:
         raise NotImplementedError()
+
+
+class NativeAdapter(PolymorphicAdapter[_S, _S]):
+    def __init__(self, native_type: type[_S]):
+        self._native_type = native_type
+
+    @property
+    def model_type(self) -> type[_S]:
+        return self._native_type
+
+    def to_model(self, polymorphic: _S) -> _S:
+        return polymorphic
+
+    def from_model(self, model: _S) -> _S:
+        return model
 
 
 class PolymorphicAdapterRegistry:
@@ -110,10 +135,10 @@ class PolymorphicAdapterRegistry:
         # list so we can use list.pop() to go from high to low priority.
         self._config_files_unread.reverse()
         self._adapter_factories: dict[str, AdapterFactory] = {}
-        self._adapters: dict[str, PolymorphicAdapter[Any, Any]] = {}
+        self._adapters: dict[str, PolymorphicAdapter[Any, pydantic.BaseModel]] = {}
 
-    def __getitem__(self, tag: str) -> PolymorphicAdapter[Any, Any]:
-        adapter: PolymorphicAdapter[Any, Any] | None = None
+    def __getitem__(self, tag: str) -> PolymorphicAdapter[Any, pydantic.BaseModel]:
+        adapter: PolymorphicAdapter[Any, pydantic.BaseModel] | None = None
         if adapter := self._adapters.get(tag):
             return adapter
         if adapter_factory := self._adapter_factories.get(tag):
@@ -136,3 +161,92 @@ class PolymorphicAdapterRegistry:
         raise KeyError(
             f"No adapter found for polymorphic field with tag {tag} in any of {self._config_files_read}."
         )
+
+    def register_adapter(self, tag: str, adapter: PolymorphicAdapter[Any, Any]) -> None:
+        self._adapters[tag] = adapter
+
+    def register_native(self, tag: str, native_type: type[Any]) -> None:
+        self._adapters[tag] = NativeAdapter(native_type)
+
+
+class PolymorphicReadError(RuntimeError):
+    pass
+
+
+class PolymorphicWriteError(RuntimeError):
+    pass
+
+
+class Polymorphic:
+    def __init__(self, get_tag: GetPolymorphicTag = get_tag_from_registry):
+        self.get_tag = get_tag
+
+    def __get_pydantic_core_schema__(
+        self, source_type: Any, handler: pydantic.GetCoreSchemaHandler
+    ) -> pcs.CoreSchema:
+        from_model_schema = pcs.chain_schema(
+            [
+                pcs.dict_schema(pcs.str_schema(), pcs.any_schema()),
+                pcs.with_info_plain_validator_function(self.deserialize),
+            ]
+        )
+        # TODO: support generic and/or union source_type.>
+        return pcs.json_or_python_schema(
+            json_schema=from_model_schema,
+            python_schema=pcs.union_schema([pcs.is_instance_schema(source_type), from_model_schema]),
+            serialization=pcs.plain_serializer_function_ser_schema(self.serialize, info_arg=True),
+        )
+
+    def deserialize(self, tree: dict[str, JsonValue], info: pydantic.ValidationInfo) -> Any:
+        if info.context is None or "polymorphic_adapter_registry" not in info.context:
+            raise PolymorphicReadError(
+                "Polymorphic field reads require an adapter registry in the Pydantic validation context."
+            )
+        return self.from_tree(tree, info.context["polymorphic_adapter_registry"])
+
+    def from_tree(self, tree: dict[str, JsonValue], adapter_registry: PolymorphicAdapterRegistry) -> Any:
+        match tree:
+            case {"tag": str(tag)}:
+                pass
+            case _:
+                raise PolymorphicReadError("No string 'tag' entry found for polymorphic field.")
+        adapter: PolymorphicAdapter[Any, Any] = adapter_registry[tag]
+        if "tag" not in adapter.model_type.model_fields:
+            del tree["tag"]
+        serialized = adapter.model_type.model_validate(tree)
+        return adapter.from_model(serialized)
+
+    def serialize(
+        self,
+        obj: Any,
+        info: pydantic.SerializationInfo,
+    ) -> dict[str, JsonValue]:
+        if info.context is None or "polymorphic_adapter_registry" not in info.context:
+            raise PolymorphicWriteError(
+                "Polymorphic field writes require an adapter registry in the Pydantic serialization context."
+            )
+        return self.to_tree(
+            obj,
+            adapter_registry=info.context["polymorphic_adapter_registry"],
+            array_writer=info.context.get("array_writer"),
+        )
+
+    def to_tree(
+        self,
+        obj: Any,
+        adapter_registry: PolymorphicAdapterRegistry,
+        array_writer: asdf_utils.ArrayWriter | None = None,
+    ) -> dict[str, JsonValue]:
+        tag = self.get_tag(obj)
+        adapter = adapter_registry[tag]
+        serialized = adapter.to_model(obj)
+        context: dict[str, Any] = dict(polymorphic_adapter_registry=adapter_registry)
+        if array_writer is not None:
+            context["array_writer"] = array_writer
+        data = serialized.model_dump(context=context)
+        if data.setdefault("tag", tag) != tag:
+            raise PolymorphicWriteError(
+                f"Serialized form already has tag={data['tag']!r}, "
+                f"which is inconsistent with tag={tag!r} from the get_tag callback."
+            )
+        return data

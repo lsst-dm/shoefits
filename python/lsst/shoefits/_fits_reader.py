@@ -15,12 +15,12 @@ __all__ = ("FitsReader", "ReadError")
 
 import json
 import math
+import warnings
 from collections.abc import Mapping
 from typing import Any, BinaryIO, Generic, TypeVar
 
 import astropy.io.fits
 import numpy as np
-import pydantic
 
 from . import asdf_utils, keywords
 from ._field_info import (
@@ -35,12 +35,11 @@ from ._field_info import (
     StructFieldInfo,
     ValueFieldInfo,
 )
-from ._frame import Frame
 from ._geom import Box, Extent, Point
 from ._image import Image, ImageReference
 from ._mask import Mask, MaskReference, MaskSchema
-from ._polymorphic import PolymorphicAdapter, PolymorphicAdapterRegistry
-from ._struct import Struct
+from ._polymorphic import Polymorphic, PolymorphicAdapterRegistry, PolymorphicReadError
+from ._struct import ReadErrorDeferred, Struct
 from .json_utils import JsonValue
 
 FITS_BLOCK_SIZE = 2880
@@ -144,7 +143,10 @@ class FitsReader(Generic[_T]):
             case SequenceFieldInfo():
                 return self._read_sequence(field_info, tree, path, frame_depth, target)
             case ModelFieldInfo():
-                return self._read_model(field_info.cls, tree, path)
+                # TODO: pass an ASDF array reader in the context as well.
+                return field_info.cls.model_validate(
+                    tree, context=dict(polymorphic_adapter_registry=self._adapter_registry)
+                )
             case HeaderFieldInfo():
                 return self._read_header(field_info, tree, path, frame_depth)
         raise AssertionError()
@@ -266,9 +268,6 @@ class FitsReader(Generic[_T]):
             )
         return field_info.load_factory(load_data)
 
-    def _read_model(self, model_type: type[pydantic.BaseModel], tree: Any, path: str) -> pydantic.BaseModel:
-        return model_type.model_validate(tree)
-
     def _read_header(
         self, field_info: HeaderFieldInfo, tree: JsonValue, path: str, frame_depth: int
     ) -> astropy.io.fits.Header:
@@ -279,30 +278,14 @@ class FitsReader(Generic[_T]):
     def _read_polymorphic(
         self, field_info: PolymorphicFieldInfo, tree: dict[str, JsonValue], path: str, frame_depth: int
     ) -> Any:
-        match tree:
-            case {"tag": str(tag)}:
-                pass
-            case _:
-                raise ReadError(f"No string 'tag' entry found for polymorphic field at {path}.")
-        adapter: PolymorphicAdapter[Any, Struct | pydantic.BaseModel] = self._adapter_registry[tag]
-        if issubclass(adapter.serialized_type, Struct):
-            if "tag" not in adapter.serialized_type.struct_fields:
-                del tree["tag"]
-            serialized = self._read_struct(
-                adapter.serialized_type,
-                isinstance(adapter.serialized_type, Frame),
-                tree,
-                path,
-                frame_depth,
-                None,
-            )
-        elif issubclass(adapter.serialized_type, pydantic.BaseModel):
-            if "tag" not in adapter.serialized_type.model_fields:
-                del tree["tag"]
-            serialized = self._read_model(adapter.serialized_type, tree, path)
-        else:
-            raise ReadError(
-                f"Unsupported serialized type {adapter.serialized_type.__name__} "
-                f"for polymorphic object at {path}."
-            )
-        return adapter.from_serialized(serialized)
+        try:
+            return Polymorphic(field_info.get_tag).from_tree(tree, self._adapter_registry)
+        except PolymorphicReadError as err:
+            match field_info.on_load_failure:
+                case "ignore":
+                    return ReadErrorDeferred(err)
+                case "warn":
+                    warnings.warn(str(err))
+                    return ReadErrorDeferred(err)
+                case "raise":
+                    raise ReadError(f"Failed to read polymorphic object at {path}.") from err

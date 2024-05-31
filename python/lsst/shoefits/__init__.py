@@ -38,8 +38,12 @@ __all__ = (
     "ModelFieldInfo",
     "no_bbox",
     "Point",
+    "Polymorphic",
     "PolymorphicAdapter",
     "PolymorphicAdapterRegistry",
+    "PolymorphicReadError",
+    "PolymorphicWriteError",
+    "register_tag",
     "SequenceFieldInfo",
     "Struct",
     "StructFieldInfo",
@@ -67,6 +71,14 @@ from ._frame import Frame
 from ._geom import Box, Extent, Interval, Point, bounds
 from ._image import Image
 from ._mask import Mask, MaskPlane, MaskSchema
-from ._polymorphic import GetPolymorphicTag, PolymorphicAdapter, PolymorphicAdapterRegistry
+from ._polymorphic import (
+    GetPolymorphicTag,
+    Polymorphic,
+    PolymorphicAdapter,
+    PolymorphicAdapterRegistry,
+    PolymorphicReadError,
+    PolymorphicWriteError,
+    register_tag,
+)
 from ._struct import Field, Struct, field
 from .version import __dependency_versions__, __fingerprint__, __repo_version__, __version__
