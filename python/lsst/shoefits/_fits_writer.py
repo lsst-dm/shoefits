@@ -266,11 +266,11 @@ class FitsWriter:
             case SequenceFieldInfo():
                 return self._walk_sequence(value, field_info, path, header)
             case ModelFieldInfo():
-                return self._walk_model(value)
+                return self._walk_model(value, field_info, header)
             case HeaderFieldInfo():
                 return self._walk_header(value, field_info, path, header)
             case PolymorphicFieldInfo():
-                return self._walk_polymorphic(value, field_info)
+                return self._walk_polymorphic(value, field_info, header)
         raise AssertionError()
 
     def _walk_value(
@@ -370,8 +370,14 @@ class FitsWriter:
                 result.append(self._walk_dispatch(value, field_info.value, path.push(index), header))
         return result
 
-    def _walk_model(self, model: pydantic.BaseModel) -> dict[str, JsonValue]:
-        context = {"block_writer": self._block_writer}
+    def _walk_model(
+        self, model: pydantic.BaseModel, field_info: ModelFieldInfo, header: astropy.io.fits.Header | None
+    ) -> dict[str, JsonValue]:
+        context = {"block_writer": self._block_writer, "polymorphic_adapter_registry": self._adapter_registry}
+        if field_info.fits_header_extract is not None:
+            if header is None:
+                header = self._primary_header
+            header.update(field_info.fits_header_extract(model))
         return model.model_dump(context=context)
 
     def _walk_header(
@@ -393,9 +399,13 @@ class FitsWriter:
         self._primary_header.update(value)
         raise SkipNode()
 
-    def _walk_polymorphic(self, obj: Any, field_info: PolymorphicFieldInfo) -> JsonValue:
+    def _walk_polymorphic(
+        self, obj: Any, field_info: PolymorphicFieldInfo, header: astropy.io.fits.Header | None
+    ) -> JsonValue:
+        if header is None:
+            header = self._primary_header
         return Polymorphic(field_info.get_tag).to_tree(
-            obj, adapter_registry=self._adapter_registry, array_writer=self._block_writer
+            obj, adapter_registry=self._adapter_registry, array_writer=self._block_writer, header=header
         )
 
     def _add_array_start_wcs(self, start: Point, header: astropy.io.fits.Header, wcs_name: str = "A") -> None:

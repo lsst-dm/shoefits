@@ -292,6 +292,7 @@ class SequenceFieldInfo(FieldInfoBase):
 class ModelFieldInfo(FieldInfoBase):
     cls: type[pydantic.BaseModel]
     default_factory: Callable[[], pydantic.BaseModel] | None = None
+    fits_header_extract: Callable[[pydantic.BaseModel], astropy.io.fits.Header] | None = None
 
     @classmethod
     def build(

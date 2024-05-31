@@ -27,6 +27,7 @@ from abc import abstractmethod
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any, Generic, Protocol, TypeAlias, TypeVar, final, overload
 
+import astropy.io.fits
 import pydantic
 import pydantic_core.core_schema as pcs
 
@@ -106,6 +107,9 @@ class PolymorphicAdapter(Generic[_T, _S]):
     @abstractmethod
     def from_model(self, model: _S) -> _T:
         raise NotImplementedError()
+
+    def extract_fits_header(self, polymorphic: _T) -> astropy.io.fits.Header | None:
+        return None
 
 
 class NativeAdapter(PolymorphicAdapter[_S, _S]):
@@ -236,6 +240,7 @@ class Polymorphic:
         obj: Any,
         adapter_registry: PolymorphicAdapterRegistry,
         array_writer: asdf_utils.ArrayWriter | None = None,
+        header: astropy.io.fits.Header | None = None,
     ) -> dict[str, JsonValue]:
         tag = self.get_tag(obj)
         adapter = adapter_registry[tag]
@@ -249,4 +254,6 @@ class Polymorphic:
                 f"Serialized form already has tag={data['tag']!r}, "
                 f"which is inconsistent with tag={tag!r} from the get_tag callback."
             )
+        if header is not None and (extracted := adapter.extract_fits_header(obj)):
+            header.update(extracted)
         return data
