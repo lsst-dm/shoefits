@@ -19,7 +19,9 @@ __all__ = (
     "ArrayModel",
     "ArraySerialization",
     "Array",
+    "Quantity",
     "QuantityModel",
+    "QuantitySerialization",
     "Unit",
     "UnitSerialization",
 )
@@ -234,23 +236,13 @@ class ArraySerialization:
         return cls.to_model(array, writer)
 
 
-Array: TypeAlias = Annotated[
-    np.ndarray,
-    ArraySerialization,
-    pydantic.WithJsonSchema(
-        {
-            "$schema": "http://stsci.edu/schemas/yaml-schema/draft-01",
-            "id": "http://stsci.edu/schemas/asdf/core/ndarray-1.1.0",
-            "tag": "!core/ndarray-1.1.0",
-        }
-    ),
-]
+Array: TypeAlias = Annotated[np.ndarray, ArraySerialization]
 
 
 class QuantityModel(pydantic.BaseModel):
     """Model for the subset of the ASDF 'quantity' schema used by shoefits."""
 
-    value: ArrayModel
+    value: ArrayModel | float
     unit: Unit
 
     model_config = pydantic.ConfigDict(
@@ -260,3 +252,55 @@ class QuantityModel(pydantic.BaseModel):
             "tag": "!unit/quantity-1.2.0",
         }
     )
+
+
+class QuantitySerialization:
+    """Pydantic hooks for quantity serialization."""
+
+    @classmethod
+    def __get_pydantic_core_schema__(
+        cls, source_type: Any, handler: pydantic.GetCoreSchemaHandler
+    ) -> pcs.CoreSchema:
+        from_model_schema = pcs.chain_schema(
+            [
+                QuantityModel.__pydantic_core_schema__,
+                pcs.with_info_plain_validator_function(cls.from_model),
+            ]
+        )
+        return pcs.json_or_python_schema(
+            json_schema=from_model_schema,
+            python_schema=pcs.union_schema(
+                [pcs.is_instance_schema(astropy.units.Quantity), from_model_schema]
+            ),
+            serialization=pcs.plain_serializer_function_ser_schema(cls.to_model, info_arg=True),
+        )
+
+    @classmethod
+    def from_model(cls, model: QuantityModel, info: pydantic.ValidationInfo) -> np.ndarray:
+        if isinstance(model.value, float):
+            return astropy.units.Quantity(model.value, unit=model.unit)
+        return astropy.units.Quantity(ArraySerialization.from_model(model.value, info), unit=model.unit)
+
+    @classmethod
+    def to_model(cls, quantity: astropy.units.Quantity, writer: ArrayWriter | None = None) -> QuantityModel:
+        if quantity.isscalar:
+            return QuantityModel(value=quantity.to_value(), unit=UnitSerialization.to_str(quantity.unit))
+        else:
+            return QuantityModel(
+                value=ArraySerialization.to_model(quantity.to_value(), writer),
+                unit=quantity.unit,
+            )
+
+    @classmethod
+    def serialize(
+        cls,
+        quantity: astropy.units.Quantity,
+        info: pydantic.SerializationInfo,
+    ) -> QuantityModel:
+        writer: ArrayWriter | None = None
+        if info is not None and info.context is not None:
+            writer = info.context.get("array_writer")
+        return cls.to_model(quantity, writer)
+
+
+Quantity: TypeAlias = Annotated[astropy.units.Quantity, QuantitySerialization]

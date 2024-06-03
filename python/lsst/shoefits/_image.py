@@ -126,5 +126,7 @@ class ImageReference(pydantic.BaseModel):
 
     def unpack(self) -> tuple[asdf_utils.ArrayModel, asdf_utils.Unit | None]:
         if isinstance(self.data, asdf_utils.QuantityModel):
+            if not isinstance(self.data.value, asdf_utils.ArrayReferenceModel | asdf_utils.InlineArrayModel):
+                raise ValueError("Expected array quantity, not scalar.")
             return self.data.value, self.data.unit
         return self.data, None
