@@ -19,8 +19,9 @@ from typing import cast
 
 import astropy.io.fits
 import astropy.units as u
-import lsst.shoefits as shf
 import numpy as np
+
+import lsst.shoefits as shf
 
 adapter_registry = shf.PolymorphicAdapterRegistry()
 

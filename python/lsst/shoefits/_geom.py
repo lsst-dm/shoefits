@@ -34,12 +34,10 @@ class Point(BaseGeometry):
         return Point(x=self.x + other.x, y=self.y + other.y)
 
     @overload
-    def __sub__(self, other: Point) -> Extent:
-        ...
+    def __sub__(self, other: Point) -> Extent: ...
 
     @overload
-    def __sub__(self, other: Extent) -> Point:
-        ...
+    def __sub__(self, other: Extent) -> Point: ...
 
     def __sub__(self, other: Point | Extent) -> Any:
         result_type = Point if type(other) is Extent else Extent
