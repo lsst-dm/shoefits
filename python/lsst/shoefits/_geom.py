@@ -100,6 +100,10 @@ class Interval(BaseGeometry):
     def arange(self) -> np.ndarray:
         return np.arange(self.start, self.stop)
 
+    @property
+    def center(self) -> float:
+        return 0.5 * (self.min + self.max)
+
     def __str__(self) -> str:
         return f"{self.start}:{self.stop}"
 
