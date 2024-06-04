@@ -22,6 +22,9 @@ __all__ = (
     "Quantity",
     "QuantityModel",
     "QuantitySerialization",
+    "Time",
+    "TimeModel",
+    "TimeSerialization",
     "Unit",
     "UnitSerialization",
 )
@@ -30,6 +33,7 @@ from abc import ABC, abstractmethod
 from collections.abc import Iterable
 from typing import Annotated, Any, BinaryIO, Literal, TypeAlias, Union
 
+import astropy.time
 import astropy.units
 import numpy as np
 import pydantic
@@ -304,3 +308,52 @@ class QuantitySerialization:
 
 
 Quantity: TypeAlias = Annotated[astropy.units.Quantity, QuantitySerialization]
+
+
+class TimeModel(pydantic.BaseModel):
+    """Model for the subset of the ASDF 'time' schema used by shoefits."""
+
+    value: str
+    scale: Literal["utc", "tai"]
+    format: Literal["iso"] = "iso"
+
+    model_config = pydantic.ConfigDict(
+        json_schema_extra={
+            "$schema": "http://stsci.edu/schemas/yaml-schema/draft-01",
+            "id": "http://stsci.edu/schemas/asdf/time/time-1.2.0",
+            "tag": "!time/time-1.2.0",
+        }
+    )
+
+
+class TimeSerialization:
+    """Pydantic hooks for time serialization."""
+
+    @classmethod
+    def __get_pydantic_core_schema__(
+        cls, source_type: Any, handler: pydantic.GetCoreSchemaHandler
+    ) -> pcs.CoreSchema:
+        from_model_schema = pcs.chain_schema(
+            [
+                TimeModel.__pydantic_core_schema__,
+                pcs.no_info_plain_validator_function(cls.from_model),
+            ]
+        )
+        return pcs.json_or_python_schema(
+            json_schema=from_model_schema,
+            python_schema=pcs.union_schema([pcs.is_instance_schema(astropy.time.Time), from_model_schema]),
+            serialization=pcs.plain_serializer_function_ser_schema(cls.to_model, info_arg=False),
+        )
+
+    @classmethod
+    def from_model(cls, model: TimeModel) -> astropy.time.Time:
+        return astropy.time.Time(model.value, scale=model.scale, format=model.format)
+
+    @classmethod
+    def to_model(cls, time: astropy.time.Time) -> TimeModel:
+        if time.scale != "utc" and time.scale != "tai":
+            time = time.tai
+        return TimeModel(value=time.to_value("fits"), scale=time.scale, format="iso")
+
+
+Time: TypeAlias = Annotated[astropy.time.Time, TimeSerialization]
