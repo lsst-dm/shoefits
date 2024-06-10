@@ -13,10 +13,36 @@ from __future__ import annotations
 
 __all__ = ()
 
+import dataclasses
+from typing import Self
+
+import astropy.io.fits
 
 FORMAT_VERSION = "SHOEFITS"
 EXT_ADDRESS = "ADR{:05d}"
 EXT_LABEL = "LBL{:05d}"
 ASDF_BLOCK_SIZE = "BLK{:05d}"
 TREE_SIZE = "TREESIZE"
-AFW_MASK_PLANE = "MP_{}"
+AFW_MASK_PLANE = "HIERARCH MP_{}"
+
+
+@dataclasses.dataclass
+class FitsExtensionLabel:
+    extname: str
+    extver: int | None
+
+    def __str__(self) -> str:
+        result = self.extname
+        if self.extver is not None:
+            result = f"{result},{self.extver}"
+        return result
+
+    def update_header(self, header: astropy.io.fits.Header) -> None:
+        header["EXTNAME"] = self.extname
+        if self.extver is not None:
+            header["EXTVER"] = self.extver
+
+    @classmethod
+    def parse(cls, s: str) -> Self:
+        extname, _, raw_extver = s.partition(",")
+        return cls(extname=extname, extver=int(raw_extver) if raw_extver else None)

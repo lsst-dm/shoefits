@@ -149,6 +149,9 @@ class Interval(BaseGeometry):
             return Interval.model_construct(start=new_start, stop=new_stop)
         return None
 
+    def slice_within(self, other: Interval) -> slice:
+        return slice(self.start - other.start, self.stop - other.start)
+
 
 @final
 class Box(BaseGeometry):

@@ -24,7 +24,9 @@ import pydantic
 import pydantic_core.core_schema as pcs
 
 from . import asdf_utils
+from ._dtypes import UnsignedIntegerType, numpy_to_str
 from ._geom import Box, Extent, Point
+from ._write_context import WriteContext, WriteError
 
 
 @dataclasses.dataclass(frozen=True)
@@ -151,7 +153,7 @@ class Mask:
         return pcs.json_or_python_schema(
             json_schema=from_ref_schema,
             python_schema=pcs.union_schema([pcs.is_instance_schema(Mask), from_ref_schema]),
-            serialization=pcs.plain_serializer_function_ser_schema(cls._serialize),
+            serialization=pcs.plain_serializer_function_ser_schema(cls._serialize, info_arg=True),
         )
 
     @classmethod
@@ -161,7 +163,14 @@ class Mask:
         return cls(array, start=reference.start, schema=schema)
 
     def _serialize(self, info: pydantic.SerializationInfo) -> MaskReference:
-        data = asdf_utils.ArraySerialization.serialize(self.array, info)
+        if (write_context := WriteContext.from_info(info)) is None:
+            raise WriteError("Cannot write mask without WriteContext in Pydantic SerializationInfo.")
+        source = write_context.add_mask(self)
+        data = asdf_utils.ArrayReferenceModel(
+            source=source,
+            shape=self.array.shape,
+            datatype=numpy_to_str(self.array.dtype, UnsignedIntegerType),
+        )
         return MaskReference(data=data, start=self.bbox.start, planes=list(self.schema))
 
     @classmethod

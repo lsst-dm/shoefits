@@ -12,8 +12,6 @@
 from __future__ import annotations
 
 __all__ = (
-    "ArrayReader",
-    "ArrayWriter",
     "InlineArrayModel",
     "ArrayReferenceModel",
     "ArrayModel",
@@ -29,9 +27,7 @@ __all__ = (
     "UnitSerialization",
 )
 
-from abc import ABC, abstractmethod
-from collections.abc import Iterable
-from typing import Annotated, Any, BinaryIO, Literal, TypeAlias, Union
+from typing import Annotated, Any, Literal, TypeAlias, Union
 
 import astropy.time
 import astropy.units
@@ -40,52 +36,9 @@ import pydantic
 import pydantic_core.core_schema as pcs
 
 from ._dtypes import NumberType, numpy_to_str, str_to_numpy
-
-
-class ArrayWriter(ABC):
-    """Serialization helper that gathers Numpy arrays from a Struct or
-    Pydantic tree in order to write them elsewhere.
-    """
-
-    @abstractmethod
-    def add_array(self, array: np.ndarray) -> str | int:
-        raise NotImplementedError()
-
-
-class BlockArrayWriter(ArrayWriter):
-    """Implementation of ArrayWriter that writes to ASDF-style blocks just
-    after the JSON tree.
-    """
-
-    def __init__(self) -> None:
-        self._arrays: list[np.ndarray] = []
-
-    def add_array(self, array: np.ndarray) -> int:
-        source = len(self._arrays)
-        self._arrays.append(array)
-        return source
-
-    def write(self, buffer: BinaryIO) -> None:
-        if self._arrays:
-            raise NotImplementedError("TODO")
-
-    def sizes(self) -> Iterable[int]:
-        if self._arrays:
-            raise NotImplementedError("TODO")
-        return ()
-
-
-class ArrayReader:
-    """Deserialization helper that loads arrays that have been serialized
-    outside the JSON tree.
-
-    An instance of this class should be added to the Pydantic Validation
-    Context dictionary with the "asdf_reader" key in order to allow nested
-    objects to retreive their arrays.
-    """
-
-    def get_array(self, index: int | str) -> np.ndarray:
-        raise NotImplementedError("TODO")
+from ._geom import Point
+from ._read_context import ReadContext
+from ._write_context import WriteContext
 
 
 class UnitSerialization:
@@ -205,27 +158,23 @@ class ArraySerialization:
 
     @classmethod
     def from_model(cls, model: ArrayModel, info: pydantic.ValidationInfo) -> np.ndarray:
+        if read_context := ReadContext.from_info(info):
+            return read_context.get_array(model, Point(x=0, y=0))
         match model:
-            case ArrayReferenceModel(source=source):
-                reader: ArrayReader
-                if info.context is not None and (reader := info.context.get("asdf_reader")):
-                    return reader.get_array(source)
-                else:
-                    raise ValueError(
-                        "Serialized array is a reference, but no reader provided in validation context."
-                    )
+            case ArrayReferenceModel():
+                raise ValueError("Serialized array is a reference, but no read context provided.")
             case InlineArrayModel(data=data, datatype=datatype):
                 dtype = str_to_numpy(datatype)
                 return np.array(data, dtype=dtype)
         raise AssertionError("Unexpected member in ArrayModel union.")
 
     @classmethod
-    def to_model(cls, array: np.ndarray, writer: ArrayWriter | None = None) -> ArrayModel:
+    def to_model(cls, array: np.ndarray, write_context: WriteContext | None = None) -> ArrayModel:
         datatype = numpy_to_str(array.dtype, NumberType)
-        if writer is None:
+        if write_context is None:
             return InlineArrayModel(data=array.tolist(), datatype=datatype)
         else:
-            source = writer.add_array(array)
+            source = write_context.add_array(array)
             return ArrayReferenceModel(source=source, shape=array.shape, datatype=datatype)
 
     @classmethod
@@ -234,10 +183,7 @@ class ArraySerialization:
         array: np.ndarray,
         info: pydantic.SerializationInfo,
     ) -> ArrayModel:
-        writer: ArrayWriter | None = None
-        if info is not None and info.context is not None:
-            writer = info.context.get("array_writer")
-        return cls.to_model(array, writer)
+        return cls.to_model(array, WriteContext.from_info(info))
 
 
 Array: TypeAlias = Annotated[np.ndarray, ArraySerialization]
@@ -286,12 +232,14 @@ class QuantitySerialization:
         return astropy.units.Quantity(ArraySerialization.from_model(model.value, info), unit=model.unit)
 
     @classmethod
-    def to_model(cls, quantity: astropy.units.Quantity, writer: ArrayWriter | None = None) -> QuantityModel:
+    def to_model(
+        cls, quantity: astropy.units.Quantity, write_context: WriteContext | None = None
+    ) -> QuantityModel:
         if quantity.isscalar:
             return QuantityModel(value=quantity.to_value(), unit=UnitSerialization.to_str(quantity.unit))
         else:
             return QuantityModel(
-                value=ArraySerialization.to_model(quantity.to_value(), writer),
+                value=ArraySerialization.to_model(quantity.to_value(), write_context),
                 unit=quantity.unit,
             )
 
@@ -301,10 +249,7 @@ class QuantitySerialization:
         quantity: astropy.units.Quantity,
         info: pydantic.SerializationInfo,
     ) -> QuantityModel:
-        writer: ArrayWriter | None = None
-        if info is not None and info.context is not None:
-            writer = info.context.get("array_writer")
-        return cls.to_model(quantity, writer)
+        return cls.to_model(quantity, WriteContext.from_info(info))
 
 
 Quantity: TypeAlias = Annotated[astropy.units.Quantity, QuantitySerialization]

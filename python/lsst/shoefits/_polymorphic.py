@@ -25,7 +25,7 @@ __all__ = (
 import os
 from abc import abstractmethod
 from collections.abc import Callable
-from typing import TYPE_CHECKING, Any, Generic, Protocol, TypeAlias, TypeVar, final, overload
+from typing import Any, Generic, Protocol, TypeAlias, TypeVar, final, overload
 
 import astropy.io.fits
 import pydantic
@@ -34,11 +34,9 @@ import pydantic_core.core_schema as pcs
 from lsst.resources import ResourcePath
 from lsst.utils.doImport import doImportType
 
+from ._read_context import ReadContext
+from ._write_context import WriteContext
 from .json_utils import JsonValue
-
-if TYPE_CHECKING:
-    from . import asdf_utils
-
 
 _C = TypeVar("_C", bound=type[Any])
 _T = TypeVar("_T")
@@ -202,22 +200,20 @@ class Polymorphic:
         )
 
     def deserialize(self, tree: dict[str, JsonValue], info: pydantic.ValidationInfo) -> Any:
-        if info.context is None or "polymorphic_adapter_registry" not in info.context:
+        if (read_context := ReadContext.from_info(info)) is None:
             raise PolymorphicReadError(
-                "Polymorphic field reads require an adapter registry in the Pydantic validation context."
+                "Polymorphic fields require a ReadContext in the Pydantic validation context."
             )
-        return self.from_tree(tree, info.context["polymorphic_adapter_registry"])
-
-    def from_tree(self, tree: dict[str, JsonValue], adapter_registry: PolymorphicAdapterRegistry) -> Any:
         match tree:
             case {"tag": str(tag)}:
                 pass
             case _:
                 raise PolymorphicReadError("No string 'tag' entry found for polymorphic field.")
-        adapter: PolymorphicAdapter[Any, Any] = adapter_registry[tag]
-        if "tag" not in adapter.model_type.model_fields:
+        adapter: PolymorphicAdapter[Any, Any] = read_context.polymorphic_adapter_registry[tag]
+        model_type: type[pydantic.BaseModel] = adapter.model_type
+        if "tag" not in model_type.model_fields:
             del tree["tag"]
-        serialized = adapter.model_type.model_validate(tree)
+        serialized = model_type.model_validate(tree, context=info.context)
         return adapter.from_model(serialized)
 
     def serialize(
@@ -225,35 +221,19 @@ class Polymorphic:
         obj: Any,
         info: pydantic.SerializationInfo,
     ) -> dict[str, JsonValue]:
-        if info.context is None or "polymorphic_adapter_registry" not in info.context:
+        if (write_context := WriteContext.from_info(info)) is None:
             raise PolymorphicWriteError(
                 "Polymorphic field writes require an adapter registry in the Pydantic serialization context."
             )
-        return self.to_tree(
-            obj,
-            adapter_registry=info.context["polymorphic_adapter_registry"],
-            array_writer=info.context.get("array_writer"),
-        )
-
-    def to_tree(
-        self,
-        obj: Any,
-        adapter_registry: PolymorphicAdapterRegistry,
-        array_writer: asdf_utils.ArrayWriter | None = None,
-        header: astropy.io.fits.Header | None = None,
-    ) -> dict[str, JsonValue]:
         tag = self.get_tag(obj)
-        adapter = adapter_registry[tag]
+        adapter = write_context.polymorphic_adapter_registry[tag]
         serialized = adapter.to_model(obj)
-        context: dict[str, Any] = dict(polymorphic_adapter_registry=adapter_registry)
-        if array_writer is not None:
-            context["array_writer"] = array_writer
-        data = serialized.model_dump(context=context)
+        data = serialized.model_dump(context=info.context)
         if data.setdefault("tag", tag) != tag:
             raise PolymorphicWriteError(
                 f"Serialized form already has tag={data['tag']!r}, "
                 f"which is inconsistent with tag={tag!r} from the get_tag callback."
             )
-        if header is not None and (extracted := adapter.extract_fits_header(obj)):
-            header.update(extracted)
+        if extracted := adapter.extract_fits_header(obj):
+            write_context.export_header_update(extracted)
         return data

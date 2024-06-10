@@ -17,60 +17,41 @@ __all__ = (
     "bounds",
     "Box",
     "Extent",
-    "field",
-    "Field",
-    "FieldInfo",
     "FitsCompression",
     "FitsCompressionAlgorithm",
-    "FitsWriter",
+    "FitsWriteContext",
+    "FitsDataOptions",
     "FORMAT_VERSION",
-    "Frame",
     "GetPolymorphicTag",
-    "HeaderFieldInfo",
     "Image",
-    "ImageFieldInfo",
+    "ImageReference",
     "Interval",
-    "MappingFieldInfo",
     "Mask",
-    "MaskFieldInfo",
     "MaskPlane",
+    "MaskReference",
     "MaskSchema",
-    "ModelFieldInfo",
-    "no_bbox",
     "Point",
     "Polymorphic",
     "PolymorphicAdapter",
     "PolymorphicAdapterRegistry",
     "PolymorphicReadError",
     "PolymorphicWriteError",
+    "ReadContext",
+    "ReadError",
+    "WriteContext",
+    "WriteError",
     "register_tag",
-    "SequenceFieldInfo",
-    "Struct",
-    "StructFieldInfo",
-    "ValueFieldInfo",
+    "keywords",
     "asdf_utils",
     "json_utils",
 )
 
-from . import asdf_utils, json_utils
-from ._compression import FitsCompression, FitsCompressionAlgorithm
-from ._field_info import (
-    FieldInfo,
-    HeaderFieldInfo,
-    ImageFieldInfo,
-    MappingFieldInfo,
-    MaskFieldInfo,
-    ModelFieldInfo,
-    SequenceFieldInfo,
-    StructFieldInfo,
-    ValueFieldInfo,
-    no_bbox,
-)
-from ._fits_writer import FORMAT_VERSION, FitsWriter
-from ._frame import Frame
+from . import asdf_utils, json_utils, keywords
+from ._fits_options import FitsCompression, FitsCompressionAlgorithm, FitsDataOptions
+from ._fits_write_context import FORMAT_VERSION, FitsWriteContext
 from ._geom import Box, Extent, Interval, Point, bounds
-from ._image import Image
-from ._mask import Mask, MaskPlane, MaskSchema
+from ._image import Image, ImageReference
+from ._mask import Mask, MaskPlane, MaskReference, MaskSchema
 from ._polymorphic import (
     GetPolymorphicTag,
     Polymorphic,
@@ -80,5 +61,6 @@ from ._polymorphic import (
     PolymorphicWriteError,
     register_tag,
 )
-from ._struct import Field, Struct, field
+from ._read_context import ReadContext, ReadError
+from ._write_context import WriteContext, WriteError
 from .version import __dependency_versions__, __fingerprint__, __repo_version__, __version__

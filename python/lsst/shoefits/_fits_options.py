@@ -11,12 +11,15 @@
 
 from __future__ import annotations
 
-__all__ = ("FitsCompression", "FitsCompressionAlgorithm")
+__all__ = (
+    "FitsCompression",
+    "FitsCompressionAlgorithm",
+    "MaskHeaderFormat",
+    "FitsDataOptions",
+)
 
-
+import dataclasses
 import enum
-
-import pydantic
 
 from ._geom import Extent
 
@@ -26,6 +29,18 @@ class FitsCompressionAlgorithm(enum.Enum):
     GZIP_2 = "GZIP_2"
 
 
-class FitsCompression(pydantic.BaseModel):
-    algorithm: FitsCompressionAlgorithm = FitsCompressionAlgorithm.GZIP_2
+class MaskHeaderFormat(enum.Enum):
+    AFW = "afw"
+
+
+@dataclasses.dataclass
+class FitsCompression:
     tile_size: Extent
+    algorithm: FitsCompressionAlgorithm = FitsCompressionAlgorithm.GZIP_2
+
+
+@dataclasses.dataclass
+class FitsDataOptions:
+    extname: str | None = None
+    mask_header_style: MaskHeaderFormat | None = MaskHeaderFormat.AFW
+    compression: FitsCompression | None = None

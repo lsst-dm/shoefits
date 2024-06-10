@@ -22,7 +22,9 @@ import pydantic
 import pydantic_core.core_schema as pcs
 
 from . import asdf_utils
+from ._dtypes import NumberType, numpy_to_str
 from ._geom import Box, Extent, Point
+from ._write_context import WriteContext, WriteError
 
 
 class Image:
@@ -90,7 +92,7 @@ class Image:
         return pcs.json_or_python_schema(
             json_schema=from_ref_schema,
             python_schema=pcs.union_schema([pcs.is_instance_schema(Image), from_ref_schema]),
-            serialization=pcs.plain_serializer_function_ser_schema(cls._serialize),
+            serialization=pcs.plain_serializer_function_ser_schema(cls._serialize, info_arg=True),
         )
 
     @classmethod
@@ -100,7 +102,12 @@ class Image:
         return cls(array, start=reference.start, unit=unit)
 
     def _serialize(self, info: pydantic.SerializationInfo) -> ImageReference:
-        data = asdf_utils.ArraySerialization.serialize(self.array, info)
+        if (write_context := WriteContext.from_info(info)) is None:
+            raise WriteError("Cannot write image without WriteContext in Pydantic SerializationInfo.")
+        source = write_context.add_image(self)
+        data = asdf_utils.ArrayReferenceModel(
+            source=source, shape=self.array.shape, datatype=numpy_to_str(self.array.dtype, NumberType)
+        )
         return ImageReference.pack(data, self.bbox.start, self.unit)
 
     @classmethod
@@ -121,7 +128,7 @@ class ImageReference(pydantic.BaseModel):
         if unit is None:
             return cls.model_construct(data=array_model, start=start)
         return cls.model_construct(
-            data=asdf_utils.QuantityModel.model_construct(data=array_model, unit=unit), start=start
+            data=asdf_utils.QuantityModel.model_construct(value=array_model, unit=unit), start=start
         )
 
     def unpack(self) -> tuple[asdf_utils.ArrayModel, asdf_utils.Unit | None]:

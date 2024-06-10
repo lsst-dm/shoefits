@@ -20,6 +20,7 @@ from typing import cast
 import astropy.io.fits
 import astropy.units as u
 import numpy as np
+import pydantic
 
 import lsst.shoefits as shf
 
@@ -27,17 +28,27 @@ adapter_registry = shf.PolymorphicAdapterRegistry()
 
 
 def test_image_fits_write() -> None:
-    class S(shf.Struct):
-        image: shf.Image = shf.field(dtype=np.int16, unit=u.Unit("Jy"))
-        alpha: float = shf.field(fits_header=True)
-        beta: int = shf.field(fits_header=False)
+    class S(pydantic.BaseModel):
+        image: shf.Image
+        alpha: float
+        beta: int
 
-    s = S.from_box(shf.bounds[1:3, 2:6], alpha=4.125, beta=-2)
+        @pydantic.field_serializer("alpha", mode="wrap")
+        def _export_alpha(
+            self,
+            alpha: float,
+            handler: pydantic.SerializerFunctionWrapHandler,
+            info: pydantic.SerializationInfo,
+        ) -> float:
+            if write_context := shf.WriteContext.from_info(info):
+                write_context.export_header_key("ALPHA", alpha)
+            return handler(alpha)
+
+    s = S(image=shf.Image(0.0, bbox=shf.bounds[1:3, 2:6], unit=u.nJy, dtype=np.int16), alpha=4.125, beta=-2)
     x_grid, y_grid = s.image.bbox.meshgrid
     s.image.array[:, :] = x_grid * 10 + y_grid
-    writer = shf.FitsWriter(s, adapter_registry)
     buffer = BytesIO()
-    writer.write(buffer)
+    shf.FitsWriteContext(adapter_registry).write(s, buffer)
     buffer.seek(0)
     hdu_list = astropy.io.fits.open(buffer)
     buffer.seek(0)
@@ -59,12 +70,12 @@ def test_image_fits_write() -> None:
         case {
             "data": {
                 "value": {
-                    "source": "fits:image",
+                    "source": "fits:2",
                     "shape": [2, 4],
                     "datatype": "int16",
                     "byteorder": "big",
                 },
-                "unit": "Jy",
+                "unit": "nJy",
             },
             "start": {"x": 2, "y": 1},
         }:
@@ -72,7 +83,7 @@ def test_image_fits_write() -> None:
         case _:
             raise AssertionError(image_tree)
     # Check that the image address in the header is correct.
-    assert hdu_list[0].header["LBL00001"] == "image"
+    assert hdu_list[0].header["LBL00001"] == 2
     image_address = hdu_list[0].header["ADR00001"]
     array = np.frombuffer(
         buffer_bytes[image_address : image_address + s.image.array.size * 2],
@@ -80,7 +91,6 @@ def test_image_fits_write() -> None:
     ).reshape(*s.image.array.shape)
     np.testing.assert_array_equal(array, s.image.array)
     # Check that the image HDU has the right data and header.
-    assert hdu_list[1].header["EXTNAME"] == "image"
     assert hdu_list[1].header["EXTLEVEL"] == 1
     assert hdu_list[1].header["CRVAL1A"] == 2
     assert hdu_list[1].header["CRVAL2A"] == 1
@@ -98,16 +108,15 @@ def test_mask_fits_write() -> None:
         + [shf.MaskPlane(f"fill{d}", "Filler mask plane") for d in range(6)]
     )
 
-    class S(shf.Struct):
-        mask: shf.Mask = shf.field(dtype=np.uint8, fits_compression=None)
+    class S(pydantic.BaseModel):
+        mask: shf.Mask
 
     s = S(mask=shf.Mask(bbox=shf.bounds[1:5, -2:6], schema=mask_schema))
     s.mask.array[0, 0, :] = mask_schema.bitmask("bad", "interpolated")
     s.mask.array[0, 2, :] = mask_schema.bitmask("saturated")
     s.mask.array[1, 3, :] = mask_schema.bitmask("interpolated", "fill5")
-    writer = shf.FitsWriter(s, adapter_registry)
     buffer = BytesIO()
-    writer.write(buffer)
+    shf.FitsWriteContext(adapter_registry).write(s, buffer)
     buffer.seek(0)
     hdu_list = astropy.io.fits.open(buffer)
     buffer.seek(0)
@@ -128,7 +137,7 @@ def test_mask_fits_write() -> None:
     match mask_tree:
         case {
             "data": {
-                "source": "fits:mask",
+                "source": "fits:2",
                 "shape": [4, 8, 2],
                 "datatype": "uint8",
                 "byteorder": "big",
@@ -143,7 +152,7 @@ def test_mask_fits_write() -> None:
     assert shf.MaskPlane(**cast(dict, planes_list[0])) == mask_schema[0]
     assert planes_list[1] is None
     # Check that the image address in the tree is correct.
-    assert hdu_list[0].header["LBL00001"] == "mask"
+    assert hdu_list[0].header["LBL00001"] == 2
     image_address = hdu_list[0].header["ADR00001"]
     array = np.frombuffer(
         buffer_bytes[image_address : image_address + s.mask.array.size],
@@ -151,7 +160,6 @@ def test_mask_fits_write() -> None:
     ).reshape(*s.mask.array.shape)
     np.testing.assert_array_equal(array, s.mask.array)
     # Check that the image HDU has the right data and header.
-    assert hdu_list[1].header["EXTNAME"] == "mask"
     assert hdu_list[1].header["EXTLEVEL"] == 1
     assert hdu_list[1].header["CRVAL1A"] == -2
     assert hdu_list[1].header["CRVAL2A"] == 1
