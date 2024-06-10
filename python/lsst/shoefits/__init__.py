@@ -16,6 +16,7 @@ from ._fits_options import (
     FitsCompressionAlgorithm,
     FitsOptions,
     MaskHeaderFormat,
+    fits_header_exporter,
 )
 from ._fits_write_context import FORMAT_VERSION, FitsWriteContext
 from ._geom import Box, Extent, Interval, Point, bounds

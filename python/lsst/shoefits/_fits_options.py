@@ -17,12 +17,15 @@ __all__ = (
     "MaskHeaderFormat",
     "FitsOptions",
     "ExportFitsHeaderKey",
+    "fits_header_exporter",
 )
 
 import dataclasses
 import enum
-from typing import Any
+from collections.abc import Callable
+from typing import Any, TypeVar
 
+import astropy.io.fits
 import pydantic
 import pydantic_core.core_schema as pcs
 
@@ -109,3 +112,18 @@ class ExportFitsHeaderKey:
         if write_context := WriteContext.from_info(info):
             write_context.export_header_key(self.key, obj, comment=self.comment, hierarch=self.hierarch)
         return handler(obj)
+
+
+_T = TypeVar("_T")
+
+
+def fits_header_exporter(func: Callable[[_T], astropy.io.fits.Header]) -> Any:
+    @pydantic.model_serializer(mode="wrap")
+    def _fits_header_export_serializer(
+        model: _T, handler: pydantic.SerializerFunctionWrapHandler, info: pydantic.SerializationInfo
+    ) -> Any:
+        if write_context := WriteContext.from_info(info):
+            write_context.export_header_update(func(model))
+        return handler(model)
+
+    return _fits_header_export_serializer
