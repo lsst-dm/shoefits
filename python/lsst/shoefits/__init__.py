@@ -9,43 +9,6 @@
 # Use of this source code is governed by a 3-clause BSD-style
 # license that can be found in the LICENSE file.
 
-__all__ = (
-    "__dependency_versions__",
-    "__fingerprint__",
-    "__repo_version__",
-    "__version__",
-    "bounds",
-    "Box",
-    "Extent",
-    "FitsCompression",
-    "FitsCompressionAlgorithm",
-    "FitsWriteContext",
-    "FitsDataOptions",
-    "FORMAT_VERSION",
-    "GetPolymorphicTag",
-    "Image",
-    "ImageReference",
-    "Interval",
-    "Mask",
-    "MaskPlane",
-    "MaskReference",
-    "MaskSchema",
-    "Point",
-    "Polymorphic",
-    "PolymorphicAdapter",
-    "PolymorphicAdapterRegistry",
-    "PolymorphicReadError",
-    "PolymorphicWriteError",
-    "ReadContext",
-    "ReadError",
-    "WriteContext",
-    "WriteError",
-    "register_tag",
-    "keywords",
-    "asdf_utils",
-    "json_utils",
-)
-
 from . import asdf_utils, json_utils, keywords
 from ._fits_options import FitsCompression, FitsCompressionAlgorithm, FitsDataOptions
 from ._fits_write_context import FORMAT_VERSION, FitsWriteContext
