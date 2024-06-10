@@ -78,7 +78,7 @@ class FitsReadContext(ReadContext):
         return parameters.get("bbox", full_bbox)
 
     @contextmanager
-    def frame(self) -> Iterator[None]:
+    def subheader(self) -> Iterator[None]:
         self._frame_depth += 1
         yield
         self._frame_depth -= 1

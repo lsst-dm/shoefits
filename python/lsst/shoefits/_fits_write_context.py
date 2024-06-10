@@ -26,7 +26,7 @@ import numpy as np
 import pydantic
 
 from . import keywords
-from ._fits_options import FitsCompression, FitsDataOptions, MaskHeaderFormat
+from ._fits_options import FitsCompression, FitsOptions, MaskHeaderFormat
 from ._geom import Point
 from ._write_context import WriteContext
 
@@ -56,7 +56,7 @@ class FitsWriteContext(WriteContext):
         self._extensions: list[FitsExtension] = []
         self._adapter_registry = adapter_registry
         self._header_stack: list[astropy.io.fits.Header] = []
-        self._fits_data_options_stack: list[FitsDataOptions] = []
+        self._fits_data_options_stack: list[FitsOptions] = []
         self._extlevel: int = 1
         self._extname_counter: Counter[str] = Counter()
 
@@ -65,24 +65,22 @@ class FitsWriteContext(WriteContext):
         return self._adapter_registry
 
     @contextmanager
-    def frame(self) -> Iterator[None]:
-        if self._header_stack:
-            next_header = self._header_stack[-1].copy()
-        else:
-            next_header = astropy.io.fits.Header()
-        self._header_stack.append(next_header)
-        n_extensions = len(self._extensions)
-        self._extlevel += 1
-        yield
-        self._extlevel -= 1
-        if len(self._extensions) == n_extensions and self._header_stack[-1]:
-            warnings.warn("Frame included FITS header exports but no extension data.")
-        del self._header_stack[-1]
-
-    @contextmanager
-    def fits_data_options(self, options: FitsDataOptions) -> Iterator[None]:
+    def fits_write_options(self, options: FitsOptions) -> Iterator[None]:
         self._fits_data_options_stack.append(options)
+        if options.subheader:
+            if self._header_stack:
+                next_header = self._header_stack[-1].copy()
+            else:
+                next_header = astropy.io.fits.Header()
+            self._header_stack.append(next_header)
+            n_extensions = len(self._extensions)
+            self._extlevel += 1
         yield
+        if options.subheader:
+            self._extlevel -= 1
+            if len(self._extensions) == n_extensions and self._header_stack[-1]:
+                warnings.warn("Frame included FITS header exports but no extension data.")
+            del self._header_stack[-1]
         del self._fits_data_options_stack[-1]
 
     def export_header_key(
@@ -200,14 +198,14 @@ class FitsWriteContext(WriteContext):
             self._primary_header.set(
                 keywords.EXT_LABEL.format(ext_index),
                 str(label),
-                "Label (extname, extver) for extension used in tree.",
+                "Label for extension used in tree.",
             )
             self._extname_counter[label.extname] += 1
         else:
             self._primary_header.set(
                 keywords.EXT_LABEL.format(ext_index),
                 label,
-                "Label (index) for extension used in tree.",
+                "Label for extension used in tree.",
             )
         extension_only_header["EXTLEVEL"] = self._extlevel
         if start is not None:
@@ -234,7 +232,7 @@ class FitsWriteContext(WriteContext):
 
     def _add_mask_schema_header(self, header: astropy.io.fits.Header, schema: MaskSchema) -> None:
         if not self._fits_data_options_stack:
-            options = FitsDataOptions()
+            options = FitsOptions()
         else:
             options = self._fits_data_options_stack[-1]
         if options.mask_header_style is MaskHeaderFormat.AFW:

@@ -49,7 +49,7 @@ class ReadContext(ABC):
         raise NotImplementedError()
 
     @abstractmethod
-    def frame(self) -> AbstractContextManager[None]:
+    def subheader(self) -> AbstractContextManager[None]:
         raise NotImplementedError()
 
     @abstractmethod

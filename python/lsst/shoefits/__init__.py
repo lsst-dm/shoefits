@@ -10,7 +10,13 @@
 # license that can be found in the LICENSE file.
 
 from . import asdf_utils, json_utils, keywords
-from ._fits_options import FitsCompression, FitsCompressionAlgorithm, FitsDataOptions
+from ._fits_options import (
+    ExportFitsHeaderKey,
+    FitsCompression,
+    FitsCompressionAlgorithm,
+    FitsOptions,
+    MaskHeaderFormat,
+)
 from ._fits_write_context import FORMAT_VERSION, FitsWriteContext
 from ._geom import Box, Extent, Interval, Point, bounds
 from ._image import Image, ImageReference

@@ -22,7 +22,7 @@ import numpy as np
 import pydantic
 
 if TYPE_CHECKING:
-    from ._fits_options import FitsDataOptions
+    from ._fits_options import FitsOptions
     from ._image import Image
     from ._mask import Mask
     from ._polymorphic import PolymorphicAdapterRegistry
@@ -51,11 +51,7 @@ class WriteContext(ABC):
         raise NotImplementedError()
 
     @abstractmethod
-    def frame(self) -> AbstractContextManager[None]:
-        raise NotImplementedError()
-
-    @abstractmethod
-    def fits_data_options(self, options: FitsDataOptions) -> AbstractContextManager[None]:
+    def fits_write_options(self, options: FitsOptions) -> AbstractContextManager[None]:
         raise NotImplementedError()
 
     @abstractmethod

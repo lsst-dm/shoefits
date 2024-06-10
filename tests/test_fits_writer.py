@@ -15,7 +15,7 @@ __all__ = ()
 
 import json
 from io import BytesIO
-from typing import cast
+from typing import Annotated, cast
 
 import astropy.io.fits
 import astropy.units as u
@@ -29,20 +29,9 @@ adapter_registry = shf.PolymorphicAdapterRegistry()
 
 def test_image_fits_write() -> None:
     class S(pydantic.BaseModel):
-        image: shf.Image
-        alpha: float
+        image: Annotated[shf.Image, shf.FitsOptions(extname="image")]
+        alpha: Annotated[float, shf.ExportFitsHeaderKey("ALPHA")]
         beta: int
-
-        @pydantic.field_serializer("alpha", mode="wrap")
-        def _export_alpha(
-            self,
-            alpha: float,
-            handler: pydantic.SerializerFunctionWrapHandler,
-            info: pydantic.SerializationInfo,
-        ) -> float:
-            if write_context := shf.WriteContext.from_info(info):
-                write_context.export_header_key("ALPHA", alpha)
-            return handler(alpha)
 
     s = S(image=shf.Image(0.0, bbox=shf.bounds[1:3, 2:6], unit=u.nJy, dtype=np.int16), alpha=4.125, beta=-2)
     x_grid, y_grid = s.image.bbox.meshgrid
@@ -70,7 +59,7 @@ def test_image_fits_write() -> None:
         case {
             "data": {
                 "value": {
-                    "source": "fits:2",
+                    "source": "fits:image,1",
                     "shape": [2, 4],
                     "datatype": "int16",
                     "byteorder": "big",
@@ -83,7 +72,7 @@ def test_image_fits_write() -> None:
         case _:
             raise AssertionError(image_tree)
     # Check that the image address in the header is correct.
-    assert hdu_list[0].header["LBL00001"] == 2
+    assert hdu_list[0].header["LBL00001"] == "image,1"
     image_address = hdu_list[0].header["ADR00001"]
     array = np.frombuffer(
         buffer_bytes[image_address : image_address + s.image.array.size * 2],
@@ -91,6 +80,7 @@ def test_image_fits_write() -> None:
     ).reshape(*s.image.array.shape)
     np.testing.assert_array_equal(array, s.image.array)
     # Check that the image HDU has the right data and header.
+    assert hdu_list[1].header["EXTNAME"] == "image"
     assert hdu_list[1].header["EXTLEVEL"] == 1
     assert hdu_list[1].header["CRVAL1A"] == 2
     assert hdu_list[1].header["CRVAL2A"] == 1
@@ -109,7 +99,7 @@ def test_mask_fits_write() -> None:
     )
 
     class S(pydantic.BaseModel):
-        mask: shf.Mask
+        mask: Annotated[shf.Mask, shf.FitsOptions(extname=None, mask_header_style=shf.MaskHeaderFormat.AFW)]
 
     s = S(mask=shf.Mask(bbox=shf.bounds[1:5, -2:6], schema=mask_schema))
     s.mask.array[0, 0, :] = mask_schema.bitmask("bad", "interpolated")
