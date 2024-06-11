@@ -193,6 +193,7 @@ class Polymorphic:
             ]
         )
         # TODO: support generic and/or union source_type.>
+        # TODO: support nullable types with warn- or ignore-on-load-failure.
         return pcs.json_or_python_schema(
             json_schema=from_model_schema,
             python_schema=pcs.union_schema([pcs.is_instance_schema(source_type), from_model_schema]),
