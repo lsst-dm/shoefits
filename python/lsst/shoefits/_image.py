@@ -13,7 +13,7 @@ from __future__ import annotations
 
 __all__ = ("Image", "ImageReference")
 
-from typing import Any, cast
+from typing import Any, cast, final
 
 import astropy.units
 import numpy as np
@@ -27,6 +27,7 @@ from ._geom import Box, Extent, Point
 from ._write_context import WriteContext, WriteError
 
 
+@final
 class Image:
     def __init__(
         self,
@@ -78,6 +79,12 @@ class Image:
     @property
     def bbox(self) -> Box:
         return self._bbox
+
+    def __getitem__(self, bbox: Box) -> Image:
+        return Image(
+            self.array[bbox.y.slice_within(self._bbox.y), bbox.x.slice_within(self._bbox.x)],
+            bbox=bbox,
+        )
 
     @classmethod
     def __get_pydantic_core_schema__(

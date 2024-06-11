@@ -140,6 +140,13 @@ class Mask:
     def bbox(self) -> Box:
         return self._bbox
 
+    def __getitem__(self, bbox: Box) -> Mask:
+        return Mask(
+            self.array[bbox.y.slice_within(self._bbox.y), bbox.x.slice_within(self._bbox.x)],
+            bbox=bbox,
+            schema=self.schema,
+        )
+
     @classmethod
     def __get_pydantic_core_schema__(
         cls, source_type: Any, handler: pydantic.GetCoreSchemaHandler
