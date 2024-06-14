@@ -68,6 +68,22 @@ class MaskSchema:
     def __getitem__(self, i: int) -> MaskPlane | None:
         return self._planes[i]
 
+    def __repr__(self) -> str:
+        return f"MaskSchema({list(self._planes)}, dtype={self._dtype!r})"
+
+    def __str__(self) -> str:
+        return "\n".join(
+            [
+                f"{name} [{bit.index}@{hex(bit.mask)}]: {self._descriptions[name]}"
+                for name, bit in self._bits.items()
+            ]
+        )
+
+    def __eq__(self, other: object) -> bool:
+        if isinstance(other, MaskSchema):
+            return self._planes == other._planes
+        return False
+
     @property
     def dtype(self) -> np.dtype:
         return self._dtype
@@ -165,7 +181,7 @@ class Mask:
 
     @classmethod
     def _from_reference(cls, reference: MaskReference, info: pydantic.ValidationInfo) -> Mask:
-        array = asdf_utils.ArraySerialization.from_model(reference.data, info)
+        array = asdf_utils.ArraySerialization.from_model(reference.data, info, x_dim=-2, y_dim=-3)
         schema = MaskSchema(reference.planes, dtype=array.dtype)
         return cls(array, start=reference.start, schema=schema)
 

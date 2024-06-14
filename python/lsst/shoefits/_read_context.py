@@ -57,5 +57,11 @@ class ReadContext(ABC):
         raise NotImplementedError()
 
     @abstractmethod
-    def get_array(self, array_model: asdf_utils.ArrayModel, start: Point) -> np.ndarray:
+    def get_array(
+        self,
+        array_model: asdf_utils.ArrayModel,
+        start: Point,
+        x_dim: int = -1,
+        y_dim: int = -2,
+    ) -> np.ndarray:
         raise NotImplementedError()

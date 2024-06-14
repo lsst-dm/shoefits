@@ -157,9 +157,11 @@ class ArraySerialization:
         )
 
     @classmethod
-    def from_model(cls, model: ArrayModel, info: pydantic.ValidationInfo) -> np.ndarray:
+    def from_model(
+        cls, model: ArrayModel, info: pydantic.ValidationInfo, x_dim: int = -2, y_dim: int = -1
+    ) -> np.ndarray:
         if read_context := ReadContext.from_info(info):
-            return read_context.get_array(model, Point(x=0, y=0))
+            return read_context.get_array(model, Point(x=0, y=0), x_dim=x_dim, y_dim=y_dim)
         match model:
             case ArrayReferenceModel():
                 raise ValueError("Serialized array is a reference, but no read context provided.")
@@ -298,7 +300,7 @@ class TimeSerialization:
     def to_model(cls, time: astropy.time.Time) -> TimeModel:
         if time.scale != "utc" and time.scale != "tai":
             time = time.tai
-        return TimeModel(value=time.to_value("fits"), scale=time.scale, format="iso")
+        return TimeModel(value=time.to_value("iso"), scale=time.scale, format="iso")
 
 
 Time: TypeAlias = Annotated[astropy.time.Time, TimeSerialization]

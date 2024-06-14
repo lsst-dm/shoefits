@@ -20,7 +20,6 @@ __all__ = (
     "NUMPY_TYPES",
     "str_to_numpy",
     "numpy_to_str",
-    "ValueType",
 )
 
 from typing import Any, Literal, TypeAlias, get_args
@@ -57,6 +56,3 @@ def numpy_to_str(dtype: npt.DTypeLike, kind: Any) -> Any:
     if result not in get_args(kind):
         raise TypeError(f"Invalid dtype {result!r}; expected one of {get_args(kind)}.")
     return result
-
-
-ValueType: TypeAlias = Literal["int", "str", "float", "bool"]

@@ -122,7 +122,7 @@ class FitsWriteContext(WriteContext):
         self._append_extension(label, array, start=None, compression=None)
         return f"fits:{label}"
 
-    def write(self, root: pydantic.BaseModel, buffer: BinaryIO, indent: int | None = 0) -> None:
+    def write(self, root: pydantic.BaseModel, stream: BinaryIO, indent: int | None = 0) -> None:
         tree_str = root.model_dump_json(indent=indent, context=self.inject())
         asdf_buffer = BytesIO()
         asdf_buffer.write(tree_str.encode())
@@ -158,7 +158,7 @@ class FitsWriteContext(WriteContext):
             primary_hdu.header[keywords.EXT_ADDRESS.format(index + 1)] = address + len(hdu.header.tostring())
             address += hdu.filebytes()
             hdu_list.append(hdu)
-        hdu_list.writeto(buffer)  # TODO: make space for, then add checksums
+        hdu_list.writeto(stream)  # TODO: make space for, then add checksums
 
     @contextmanager
     def _current_header(self) -> Iterator[astropy.io.fits.Header]:

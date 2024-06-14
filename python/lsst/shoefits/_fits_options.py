@@ -120,10 +120,10 @@ _T = TypeVar("_T")
 def fits_header_exporter(func: Callable[[_T], astropy.io.fits.Header]) -> Any:
     @pydantic.model_serializer(mode="wrap")
     def _fits_header_export_serializer(
-        model: _T, handler: pydantic.SerializerFunctionWrapHandler, info: pydantic.SerializationInfo
+        self: _T, handler: pydantic.SerializerFunctionWrapHandler, info: pydantic.SerializationInfo
     ) -> Any:
         if write_context := WriteContext.from_info(info):
-            write_context.export_header_update(func(model))
-        return handler(model)
+            write_context.export_header_update(func(self))
+        return handler(self)
 
     return _fits_header_export_serializer

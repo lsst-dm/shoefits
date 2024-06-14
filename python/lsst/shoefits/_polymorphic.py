@@ -128,9 +128,11 @@ class NativeAdapter(PolymorphicAdapter[_S, _S]):
 class PolymorphicAdapterRegistry:
     def __init__(self) -> None:
         self._validator = pydantic.TypeAdapter(dict[str, AdapterConfig])
-        self._config_files_unread = [
-            ResourcePath(path) for path in os.environ.get("SHOEFITS_ADAPTER_CONFIGS", "").split(":")
-        ]
+        config_path = os.environ.get("SHOEFITS_ADAPTER_CONFIGS", "")
+        if config_path:
+            self._config_files_unread = [ResourcePath(path) for path in config_path.split(":")]
+        else:
+            self._config_files_unread = []
         self._config_files_read: list[str] = []
         # PATH-like envvars are expected to be processed such that items in
         # the beginning take priority over those in the back.  We reverse the
@@ -186,17 +188,19 @@ class Polymorphic:
     def __get_pydantic_core_schema__(
         self, source_type: Any, handler: pydantic.GetCoreSchemaHandler
     ) -> pcs.CoreSchema:
-        from_model_schema = pcs.chain_schema(
+        from_dict_schema = pcs.chain_schema(
             [
                 pcs.dict_schema(pcs.str_schema(), pcs.any_schema()),
                 pcs.with_info_plain_validator_function(self.deserialize),
             ]
         )
-        # TODO: support generic and/or union source_type.>
         # TODO: support nullable types with warn- or ignore-on-load-failure.
         return pcs.json_or_python_schema(
-            json_schema=from_model_schema,
-            python_schema=pcs.union_schema([pcs.is_instance_schema(source_type), from_model_schema]),
+            json_schema=from_dict_schema,
+            python_schema=pcs.tagged_union_schema(
+                {"tagged_dict": from_dict_schema, "instance": pcs.any_schema()},
+                self._deserialize_discriminator,
+            ),
             serialization=pcs.plain_serializer_function_ser_schema(self.serialize, info_arg=True),
         )
 
@@ -206,14 +210,14 @@ class Polymorphic:
                 "Polymorphic fields require a ReadContext in the Pydantic validation context."
             )
         match tree:
-            case {"tag": str(tag)}:
+            case {"$tag": str(tag)}:
                 pass
             case _:
                 raise PolymorphicReadError("No string 'tag' entry found for polymorphic field.")
         adapter: PolymorphicAdapter[Any, Any] = read_context.polymorphic_adapter_registry[tag]
         model_type: type[pydantic.BaseModel] = adapter.model_type
-        if "tag" not in model_type.model_fields:
-            del tree["tag"]
+        if "$tag" not in model_type.model_fields:
+            del tree["$tag"]
         serialized = model_type.model_validate(tree, context=info.context)
         return adapter.from_model(serialized)
 
@@ -230,11 +234,19 @@ class Polymorphic:
         adapter = write_context.polymorphic_adapter_registry[tag]
         serialized = adapter.to_model(obj)
         data = serialized.model_dump(context=info.context)
-        if data.setdefault("tag", tag) != tag:
+        if data.setdefault("$tag", tag) != tag:
             raise PolymorphicWriteError(
-                f"Serialized form already has tag={data['tag']!r}, "
-                f"which is inconsistent with tag={tag!r} from the get_tag callback."
+                f"Serialized form already has $tag={data['tag']!r}, "
+                f"which is inconsistent with $tag={tag!r} from the get_tag callback."
             )
         if extracted := adapter.extract_fits_header(obj):
             write_context.export_header_update(extracted)
         return data
+
+    @staticmethod
+    def _deserialize_discriminator(obj: Any) -> str:
+        match obj:
+            case {"$tag": _}:
+                return "tagged_dict"
+            case _:
+                return "instance"

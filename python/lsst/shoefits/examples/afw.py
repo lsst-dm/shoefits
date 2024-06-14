@@ -149,9 +149,12 @@ class WcsInterface(Protocol):
 
 
 def get_wcs_tag(wcs: WcsInterface) -> str:
-    if isinstance(wcs, astropy.wcs.WCS):
-        return "astropy_wcs"
-    return wcs.tag  # type: ignore[attr-defined]
+    match wcs:
+        case astropy.wcs.WCS():
+            return "astropy_wcs"
+        case AffineWcs():
+            return "affine_wcs"
+    raise LookupError(type(wcs).__name__)
 
 
 class FitsWcsModel(pydantic.BaseModel):
@@ -260,7 +263,10 @@ class VisitInfo(pydantic.BaseModel):
         return cls(
             exposure_time=30.0 * astropy.units.s,
             dark_time=0.0 * astropy.units.s,
-            mid_time=astropy.time.Time("2024-06-03T17:19:21.156", scale="tai") + rng.uniform(35.0, 60.0),
+            mid_time=(
+                astropy.time.Time("2024-06-03T17:19:21.156", scale="tai")
+                + rng.uniform(35.0, 60.0) * astropy.units.s
+            ),
             instrument="ImaginaryCam",
             id=47,
             observation_type="science",
@@ -316,9 +322,14 @@ class MaskedImage(pydantic.BaseModel):
     @pydantic.model_validator(mode="after")
     def _validate_bbox(self) -> Self:
         if self.image.bbox != self.mask.bbox:
-            raise ValueError("Inconsistent bounding box between image and mask.")
+            raise ValueError(
+                f"Inconsistent bounding box between image ({self.image.bbox}) and mask ({self.mask.bbox})."
+            )
         if self.image.bbox != self.variance.bbox:
-            raise ValueError("Inconsistent bounding box between image and variance.")
+            raise ValueError(
+                f"Inconsistent bounding box between image ({self.image.bbox}) and "
+                f"variance ({self.variance.bbox})."
+            )
         return self
 
     @property
@@ -335,10 +346,10 @@ class MaskedImage(pydantic.BaseModel):
                 shf.MaskPlane("DETECTED", "above detection threshold"),
             ]
         )
-        result = cls.from_bbox(bbox, mask_schema)
-        result.image.array = rng.randn(*result.bbox.size.shape)
-        result.mask.array |= np.multiply.outer(result.image.array > 1.0, mask_schema.bitmask("DETECTED"))
-        result.mask.array |= np.multiply.outer(result.image.array > 2.0, mask_schema.bitmask("SAT"))
+        result = cls.from_bbox(bbox, mask_schema, dtype=np.int16, **kwargs)
+        result.image.array = np.round(rng.randn(*result.bbox.size.shape) * 10)
+        result.mask.array |= np.multiply.outer(result.image.array > 10.0, mask_schema.bitmask("DETECTED"))
+        result.mask.array |= np.multiply.outer(result.image.array > 20.0, mask_schema.bitmask("SAT"))
         result.mask.array |= np.multiply.outer(
             rng.randn(*result.bbox.size.shape) > 2.0, mask_schema.bitmask("SAT")
         )
@@ -349,6 +360,8 @@ class Exposure(MaskedImage, ExposureInfo):
     @classmethod
     def make_example(cls, bbox: shf.Box, rng: np.random.RandomState, **kwargs: Any) -> Self:
         return super().make_example(
+            bbox,
+            rng,
             wcs=make_example_fits_wcs(bbox, rng),
             visit_info=VisitInfo.make_example(rng),
             photo_calib=PhotoCalib.make_example(bbox, rng),

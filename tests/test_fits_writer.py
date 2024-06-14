@@ -36,12 +36,12 @@ def test_image_fits_write() -> None:
     s = S(image=shf.Image(0.0, bbox=shf.bounds[1:3, 2:6], unit=u.nJy, dtype=np.int16), alpha=4.125, beta=-2)
     x_grid, y_grid = s.image.bbox.meshgrid
     s.image.array[:, :] = x_grid * 10 + y_grid
-    buffer = BytesIO()
-    shf.FitsWriteContext(adapter_registry).write(s, buffer)
-    buffer.seek(0)
-    hdu_list = astropy.io.fits.open(buffer)
-    buffer.seek(0)
-    buffer_bytes = buffer.getvalue()
+    stream = BytesIO()
+    shf.FitsWriteContext(adapter_registry).write(s, stream)
+    stream.seek(0)
+    hdu_list = astropy.io.fits.open(stream)
+    stream.seek(0)
+    buffer_bytes = stream.getvalue()
     assert len(hdu_list) == 2
     assert [int(k) for k in hdu_list[0].header["SHOEFITS"].split(".")] == list(shf.FORMAT_VERSION)
     assert hdu_list[0].header["ALPHA"] == s.alpha
