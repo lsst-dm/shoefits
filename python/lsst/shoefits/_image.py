@@ -113,7 +113,7 @@ class Image:
             raise WriteError("Cannot write image without WriteContext in Pydantic SerializationInfo.")
         source = write_context.add_image(self)
         data = asdf_utils.ArrayReferenceModel(
-            source=source, shape=self.array.shape, datatype=numpy_to_str(self.array.dtype, NumberType)
+            source=source, shape=list(self.array.shape), datatype=numpy_to_str(self.array.dtype, NumberType)
         )
         return ImageReference.pack(data, self.bbox.start, self.unit)
 

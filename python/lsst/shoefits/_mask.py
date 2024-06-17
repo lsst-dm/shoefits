@@ -191,7 +191,7 @@ class Mask:
         source = write_context.add_mask(self)
         data = asdf_utils.ArrayReferenceModel(
             source=source,
-            shape=self.array.shape,
+            shape=list(self.array.shape),
             datatype=numpy_to_str(self.array.dtype, UnsignedIntegerType),
         )
         return MaskReference(data=data, start=self.bbox.start, planes=list(self.schema))

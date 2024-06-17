@@ -89,7 +89,7 @@ class ArrayReferenceModel(pydantic.BaseModel):
     """
 
     source: str | int
-    shape: tuple[int, ...]
+    shape: list[int]
     datatype: NumberType
     byteorder: Literal["big"] = "big"
 
@@ -177,7 +177,7 @@ class ArraySerialization:
             return InlineArrayModel(data=array.tolist(), datatype=datatype)
         else:
             source = write_context.add_array(array)
-            return ArrayReferenceModel(source=source, shape=array.shape, datatype=datatype)
+            return ArrayReferenceModel(source=source, shape=list(array.shape), datatype=datatype)
 
     @classmethod
     def serialize(

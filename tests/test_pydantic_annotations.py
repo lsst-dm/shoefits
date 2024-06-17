@@ -22,6 +22,7 @@ import numpy as np
 import pydantic
 
 import lsst.shoefits as shf
+from lsst.shoefits.testing.contexts import TestingReadContext, TestingWriteContext
 
 
 class Thing(ABC):
@@ -78,10 +79,11 @@ def test_round_trip_json_inline() -> None:
     """Test that the Example class round-trips through Pydantic JSON
     serialization when no array writer is provided.
     """
-    context = dict(polymorphic_adapter_registry=adapter_registry)
+    write_context = TestingWriteContext(adapter_registry)
     e1 = Example(array=np.random.randn(3, 4), unit=u.s, thing=ThingA(i=2))
-    s = e1.model_dump_json(context=context)
-    e2 = Example.model_validate_json(s, context=context)
+    s = e1.model_dump_json(context=write_context.inject())
+    read_context = TestingReadContext(adapter_registry, write_context.arrays)
+    e2 = Example.model_validate_json(s, context=read_context.inject())
     np.testing.assert_array_equal(e1.array, e2.array)
     assert e1.unit == e2.unit
     assert isinstance(e2.thing, ThingA)
@@ -92,10 +94,11 @@ def test_round_trip_python_inline() -> None:
     """Test that the Example class round-trips through Pydantic Python-object
     serialization when no array writer is provided.
     """
-    context = dict(polymorphic_adapter_registry=adapter_registry)
+    write_context = TestingWriteContext(adapter_registry)
     e1 = Example(array=np.random.randn(3, 4), unit=u.s, thing=ThingB(data=3))
-    d = e1.model_dump(context=context)
-    e2 = Example.model_validate(d, context=context)
+    d = e1.model_dump(context=write_context.inject())
+    read_context = TestingReadContext(adapter_registry, write_context.arrays)
+    e2 = Example.model_validate(d, context=read_context.inject())
     np.testing.assert_array_equal(e1.array, e2.array)
     assert e1.unit == e2.unit
     assert isinstance(e2.thing, ThingB)
@@ -106,19 +109,25 @@ def test_schema_inline() -> None:
     """Test that the Example class JSON schema matches its serialization,
     and that the schema has the special information we inject.
     """
-    context = dict(polymorphic_adapter_registry=adapter_registry)
     schema = Example.model_json_schema()
-    assert "http://stsci.edu" in schema["properties"]["array"]["$schema"]
     assert "http://stsci.edu" in schema["properties"]["unit"]["$schema"]
-    assert "asdf/core/ndarray-1.1.0" in schema["properties"]["array"]["id"]
     assert "asdf/unit/unit-1.0.0" in schema["properties"]["unit"]["id"]
     assert schema["properties"]["thing"]["anyOf"] == [{"type": "object"}, {"type": "null"}]
+    # Array schema does not match ASDF's schema well enough to be worth testing
+    # yet; it's not wrong, but it's not enough of a subset for the similarity
+    # to be clear.
     jsonschema.validate(Example(array=np.random.randn(3, 4), unit=u.s).model_dump(), schema)
+    write_context = TestingWriteContext(adapter_registry)
     jsonschema.validate(
-        Example(array=np.random.randn(3, 4), unit=u.s, thing=ThingA(i=4)).model_dump(context=context),
+        Example(array=np.random.randn(3, 4), unit=u.s, thing=ThingA(i=4)).model_dump(
+            context=write_context.inject()
+        ),
         schema,
     )
+    write_context = TestingWriteContext(adapter_registry)
     jsonschema.validate(
-        Example(array=np.random.randn(3, 4), unit=u.s, thing=ThingB(data=5)).model_dump(context=context),
+        Example(array=np.random.randn(3, 4), unit=u.s, thing=ThingB(data=5)).model_dump(
+            context=write_context.inject()
+        ),
         schema,
     )

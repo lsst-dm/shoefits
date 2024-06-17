@@ -56,7 +56,7 @@ class FitsWriteContext(WriteContext):
         self._extensions: list[FitsExtension] = []
         self._adapter_registry = adapter_registry
         self._header_stack: list[astropy.io.fits.Header] = []
-        self._fits_data_options_stack: list[FitsOptions] = []
+        self._fits_options_stack: list[FitsOptions] = []
         self._extlevel: int = 1
         self._extname_counter: Counter[str] = Counter()
 
@@ -66,7 +66,7 @@ class FitsWriteContext(WriteContext):
 
     @contextmanager
     def fits_write_options(self, options: FitsOptions) -> Iterator[None]:
-        self._fits_data_options_stack.append(options)
+        self._fits_options_stack.append(options)
         if options.subheader:
             if self._header_stack:
                 next_header = self._header_stack[-1].copy()
@@ -81,7 +81,7 @@ class FitsWriteContext(WriteContext):
             if len(self._extensions) == n_extensions and self._header_stack[-1]:
                 warnings.warn("Frame included FITS header exports but no extension data.")
             del self._header_stack[-1]
-        del self._fits_data_options_stack[-1]
+        del self._fits_options_stack[-1]
 
     def export_header_key(
         self,
@@ -172,8 +172,8 @@ class FitsWriteContext(WriteContext):
             yield header
 
     def _get_next_extension_label(self) -> keywords.FitsExtensionLabel | int:
-        if self._fits_data_options_stack:
-            options = self._fits_data_options_stack[-1]
+        if self._fits_options_stack:
+            options = self._fits_options_stack[-1]
             if options.extname is not None:
                 return keywords.FitsExtensionLabel(
                     options.extname,
@@ -231,10 +231,10 @@ class FitsWriteContext(WriteContext):
         header.set(f"CUNIT2{wcs_name}", "PIXEL", "Row unit")
 
     def _add_mask_schema_header(self, header: astropy.io.fits.Header, schema: MaskSchema) -> None:
-        if not self._fits_data_options_stack:
+        if not self._fits_options_stack:
             options = FitsOptions()
         else:
-            options = self._fits_data_options_stack[-1]
+            options = self._fits_options_stack[-1]
         if options.mask_header_style is MaskHeaderFormat.AFW:
             for mask_plane_index, mask_plane in enumerate(schema):
                 if mask_plane is not None:
