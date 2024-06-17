@@ -212,10 +212,6 @@ class AffineWcs(pydantic.BaseModel):
         assert sky.frame.name == "icrs"
         return self.pixel_to_sky.inverted()(sky.ra.to_value(self.unit), sky.dec.to_value(self.unit))
 
-    @pydantic.computed_field
-    def tag(self) -> str:
-        return "affine_wcs"
-
     @classmethod
     def approximate(
         cls,
@@ -264,7 +260,7 @@ class VisitInfo(pydantic.BaseModel):
             exposure_time=30.0 * astropy.units.s,
             dark_time=0.0 * astropy.units.s,
             mid_time=(
-                astropy.time.Time("2024-06-03T17:19:21.156", scale="tai")
+                astropy.time.Time("2024-06-03 17:19:21.156", scale="tai", format="iso")
                 + rng.uniform(35.0, 60.0) * astropy.units.s
             ),
             instrument="ImaginaryCam",
@@ -381,16 +377,14 @@ class StampList(pydantic.BaseModel):
 
     @classmethod
     def make_example(cls, bbox: shf.Box, rng: np.random.RandomState, **kwargs: Any) -> Self:
-        full_exposure = Exposure.make_example(bbox, rng)
+        full_exposure = Exposure.make_example(bbox, rng, **kwargs)
         result = cls(visit_info=full_exposure.visit_info, photo_calib=full_exposure.photo_calib)
-        box_min_x = rng.randint(bbox.x.start, bbox.x.stop, size=5)
-        box_min_y = rng.randint(bbox.y.start, bbox.y.stop, size=5)
-        box_max_x = rng.randint(bbox.x.start, bbox.x.stop, size=5)
-        box_max_y = rng.randint(bbox.y.start, bbox.y.stop, size=5)
+        box_x = rng.randint(bbox.x.start, bbox.x.stop, size=(5, 2))
+        box_y = rng.randint(bbox.y.start, bbox.y.stop, size=(5, 2))
         for n in range(5):
             bbox = shf.Box(
-                x=shf.Interval(start=int(box_min_x[n]), stop=int(box_max_x[n]) + 1),
-                y=shf.Interval(start=int(box_min_y[n]), stop=int(box_max_y[n]) + 1),
+                x=shf.Interval.hull(*box_x[n, :]),
+                y=shf.Interval.hull(*box_y[n, :]),
             )
             result.stamps.append(
                 Stamp.from_section(
