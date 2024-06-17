@@ -34,4 +34,5 @@ from ._polymorphic import (
 )
 from ._read_context import ReadContext, ReadError
 from ._write_context import WriteContext, WriteError
+from .asdf_utils import Array, Quantity, Time, Unit
 from .version import __dependency_versions__, __fingerprint__, __repo_version__, __version__

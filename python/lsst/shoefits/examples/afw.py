@@ -99,7 +99,7 @@ class BoundedField(pydantic.BaseModel, ABC):
 @shf.register_tag("chebyshev_bounded_field")
 class ChebyshevBoundedField(BoundedField):
     to_chebyshev_domain: AffineTransform  # maps bbox to [-1,1]x[-1,1]
-    coefficients: shf.asdf_utils.Array  # shape=(order_x + 1, order_y + 1)
+    coefficients: shf.Array  # shape=(order_x + 1, order_y + 1)
 
     @overload
     def evaluate(self, x: float, y: float) -> float: ...
@@ -199,7 +199,7 @@ def make_example_fits_wcs(bbox: shf.Box, rng: np.random.RandomState) -> astropy.
 
 class AffineWcs(pydantic.BaseModel):
     pixel_to_sky: AffineTransform
-    unit: shf.asdf_utils.Unit = astropy.units.degree
+    unit: shf.Unit = astropy.units.degree
 
     def pixel_to_world(self, x: float, y: float) -> SkyCoord:
         ra, dec = self.pixel_to_sky(x, y)
@@ -244,9 +244,9 @@ class AffineWcs(pydantic.BaseModel):
 
 
 class VisitInfo(pydantic.BaseModel):
-    exposure_time: shf.asdf_utils.Quantity
-    dark_time: shf.asdf_utils.Quantity
-    mid_time: shf.asdf_utils.Time
+    exposure_time: shf.Quantity
+    dark_time: shf.Quantity
+    mid_time: shf.Time
     instrument: str
     id: int
     observation_type: str

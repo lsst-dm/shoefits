@@ -16,15 +16,13 @@ __all__ = (
     "ArrayReferenceModel",
     "ArrayModel",
     "ArraySerialization",
-    "Array",
-    "Quantity",
     "QuantityModel",
     "QuantitySerialization",
-    "Time",
     "TimeModel",
     "TimeSerialization",
-    "Unit",
     "UnitSerialization",
+    # Array, Quantity, Unit, and Time are lifted to package scope and should
+    # not be imported directly from this module except from within the package.
 )
 
 from typing import Annotated, Any, Literal, TypeAlias, Union

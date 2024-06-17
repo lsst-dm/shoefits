@@ -70,8 +70,8 @@ adapter_registry.register_native("B", ThingB)
 
 
 class Example(pydantic.BaseModel):
-    array: shf.asdf_utils.Array
-    unit: shf.asdf_utils.Unit
+    array: shf.Array
+    unit: shf.Unit
     thing: Annotated[Thing, shf.Polymorphic()] | None = None
 
 
