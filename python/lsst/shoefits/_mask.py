@@ -24,7 +24,7 @@ import pydantic
 import pydantic_core.core_schema as pcs
 
 from . import asdf_utils
-from ._dtypes import UnsignedIntegerType, numpy_to_str
+from ._dtypes import NumberType
 from ._geom import Box, Extent, Point
 from ._write_context import WriteContext, WriteError
 
@@ -192,7 +192,7 @@ class Mask:
         data = asdf_utils.ArrayReferenceModel(
             source=source,
             shape=list(self.array.shape),
-            datatype=numpy_to_str(self.array.dtype, UnsignedIntegerType),
+            datatype=NumberType.from_numpy(self.array.dtype).checked_unsigned(),
         )
         return MaskReference(data=data, start=self.bbox.start, planes=list(self.schema))
 

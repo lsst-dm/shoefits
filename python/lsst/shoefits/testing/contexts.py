@@ -20,7 +20,6 @@ from typing import TYPE_CHECKING
 import numpy as np
 
 from .. import asdf_utils
-from .._dtypes import str_to_numpy
 from .._fits_options import FitsOptions
 from .._geom import Point
 from .._image import Image
@@ -120,7 +119,7 @@ class TestingReadContext(ReadContext):
     ) -> np.ndarray:
         match array_model:
             case asdf_utils.InlineArrayModel():
-                return np.array(array_model.data, dtype=str_to_numpy(array_model.datatype))
+                return np.array(array_model.data, dtype=array_model.datatype.to_numpy())
             case asdf_utils.ArrayReferenceModel():
                 return self.arrays[array_model.source]
             case _:

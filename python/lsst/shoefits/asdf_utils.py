@@ -33,7 +33,7 @@ import numpy as np
 import pydantic
 import pydantic_core.core_schema as pcs
 
-from ._dtypes import NumberType, numpy_to_str, str_to_numpy
+from ._dtypes import NumberType
 from ._geom import Point
 from ._read_context import ReadContext
 from ._write_context import WriteContext
@@ -164,13 +164,12 @@ class ArraySerialization:
             case ArrayReferenceModel():
                 raise ValueError("Serialized array is a reference, but no read context provided.")
             case InlineArrayModel(data=data, datatype=datatype):
-                dtype = str_to_numpy(datatype)
-                return np.array(data, dtype=dtype)
+                return np.array(data, dtype=datatype.to_numpy())
         raise AssertionError("Unexpected member in ArrayModel union.")
 
     @classmethod
     def to_model(cls, array: np.ndarray, write_context: WriteContext | None = None) -> ArrayModel:
-        datatype = numpy_to_str(array.dtype, NumberType)
+        datatype = NumberType.from_numpy(array.dtype)
         if write_context is None:
             return InlineArrayModel(data=array.tolist(), datatype=datatype)
         else:

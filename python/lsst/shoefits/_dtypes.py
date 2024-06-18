@@ -17,42 +17,63 @@ __all__ = (
     "IntegerType",
     "FloatType",
     "NumberType",
-    "NUMPY_TYPES",
-    "str_to_numpy",
-    "numpy_to_str",
+    "is_unsigned",
 )
 
-from typing import Any, Literal, TypeAlias, get_args
+import enum
+from typing import Literal, TypeAlias, TypeGuard, Union
 
 import numpy as np
 import numpy.typing as npt
 
-# typing.get_args does not treat Union[Literal["a"], Literal["b"]] as
-# equivalent to Literal["a", "b"], so we can't get away with defining any of
-# the type aliases below in terms of each other without messing up our
-# pydantic-style runtime evaluation of annotations elsewhere.
 
-UnsignedIntegerType: TypeAlias = Literal["uint8", "uint16", "uint32", "uint64"]
+class NumberType(enum.StrEnum):
+    uint8 = enum.auto()
+    uint16 = enum.auto()
+    uint32 = enum.auto()
+    uint64 = enum.auto()
+    int8 = enum.auto()
+    int16 = enum.auto()
+    int32 = enum.auto()
+    int64 = enum.auto()
+    float32 = enum.auto()
+    float64 = enum.auto()
 
-SignedIntegerType: TypeAlias = Literal["int8", "int16", "int32", "int64"]
+    def to_numpy(self) -> type:
+        return getattr(np, self.value)
 
-IntegerType: TypeAlias = Literal["uint8", "uint16", "uint32", "uint64", "int8", "int16", "int32", "int64"]
+    @classmethod
+    def from_numpy(cls, dtype: npt.DTypeLike) -> NumberType:
+        return cls(np.dtype(dtype).name)
 
-FloatType: TypeAlias = Literal["float32", "float64"]
+    def checked_unsigned(self) -> UnsignedIntegerType:
+        if is_unsigned(self):
+            return self
+        raise TypeError(f"{self} is not an unsigned integer type.")
 
-NumberType: TypeAlias = Literal[
-    "uint8", "uint16", "uint32", "uint64", "int8", "int16", "int32", "int64", "float32", "float64"
+
+UnsignedIntegerType: TypeAlias = Union[
+    Literal[NumberType.uint8],
+    Literal[NumberType.uint16],
+    Literal[NumberType.uint32],
+    Literal[NumberType.uint64],
 ]
 
-NUMPY_TYPES: dict[str, type] = {k: getattr(np, k) for k in get_args(NumberType)}
+SignedIntegerType: TypeAlias = Union[
+    Literal[NumberType.int8],
+    Literal[NumberType.int16],
+    Literal[NumberType.int32],
+    Literal[NumberType.int64],
+]
 
 
-def str_to_numpy(s: NumberType) -> type:
-    return NUMPY_TYPES[s]
+IntegerType: TypeAlias = Union[
+    SignedIntegerType,
+    UnsignedIntegerType,
+]
+
+FloatType: TypeAlias = Union[Literal[NumberType.float32], Literal[NumberType.float64]]
 
 
-def numpy_to_str(dtype: npt.DTypeLike, kind: Any) -> Any:
-    result = np.dtype(dtype).name
-    if result not in get_args(kind):
-        raise TypeError(f"Invalid dtype {result!r}; expected one of {get_args(kind)}.")
-    return result
+def is_unsigned(t: NumberType) -> TypeGuard[UnsignedIntegerType]:
+    return np.dtype(t.to_numpy()).kind == "u"

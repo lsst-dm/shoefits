@@ -22,7 +22,7 @@ import pydantic
 import pydantic_core.core_schema as pcs
 
 from . import asdf_utils
-from ._dtypes import NumberType, numpy_to_str
+from ._dtypes import NumberType
 from ._geom import Box, Extent, Point
 from ._write_context import WriteContext, WriteError
 
@@ -113,7 +113,9 @@ class Image:
             raise WriteError("Cannot write image without WriteContext in Pydantic SerializationInfo.")
         source = write_context.add_image(self)
         data = asdf_utils.ArrayReferenceModel(
-            source=source, shape=list(self.array.shape), datatype=numpy_to_str(self.array.dtype, NumberType)
+            source=source,
+            shape=list(self.array.shape),
+            datatype=NumberType.from_numpy(self.array.dtype),
         )
         return ImageReference.pack(data, self.bbox.start, self.unit)
 

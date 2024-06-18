@@ -23,7 +23,6 @@ import numpy as np
 import pydantic
 
 from . import asdf_utils, keywords
-from ._dtypes import str_to_numpy
 from ._geom import Box, Extent, Point
 from ._polymorphic import PolymorphicAdapterRegistry
 from ._read_context import ReadContext, ReadError
@@ -152,11 +151,11 @@ class FitsReadContext(ReadContext):
                     hdu_index = self._fits.index_of((name, int(ver)))
             case asdf_utils.ArrayReferenceModel(source=int()):
                 raise NotImplementedError("ASDF blocks not supported by this reader.")
-            case asdf_utils.InlineArrayModel(data=data, datatype=type_name):
+            case asdf_utils.InlineArrayModel(data=data, datatype=type_enum):
                 # Inline arrays take a different code path because we have to
                 # convert the entire thing to an array and then (maybe) slice,
                 # whereas in other cases we do partial reads when slicing.
-                array: np.ndarray = np.array(data, dtype=str_to_numpy(type_name))
+                array: np.ndarray = np.array(data, dtype=type_enum.to_numpy())
                 full_bbox = Box.from_size(Extent(y=array.shape[y_dim], x=array.shape[x_dim]), start=start)
                 return self.apply_parameter_bbox_slice(full_bbox, array, array.ndim, x_dim, y_dim)
             case _:
