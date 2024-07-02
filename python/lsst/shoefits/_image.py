@@ -13,7 +13,7 @@ from __future__ import annotations
 
 __all__ = ("Image", "ImageReference")
 
-from typing import Any, cast, final
+from typing import Any, final
 
 import astropy.units
 import numpy as np
@@ -29,14 +29,42 @@ from ._write_context import WriteContext, WriteError
 
 @final
 class Image:
+    """An array that may be augmented with units and a nonzero origin.
+
+    Parameters
+    ----------
+    array_or_fill, optional
+        Array or fill value for the image.  If a fill value, ``bbox`` or
+        ``shape`` must be provided.
+    bbox, optional
+        Bounding box for the image.
+    start, optional
+        Logical coordinates of the first pixel in the array.  Ignored if
+        ``bbox`` is provided.  Defaults to zeros.
+    shape, optional
+        Dimensions of the array.  Only needed if ``array_or_fill` is not an
+        array and ``bbox`` is not provided.
+    unit, optional
+        Units for the image's pixel values.
+    dtype, optional
+        Pixel data type override.
+
+    Notes
+    -----
+    Indexing the `array` attribute of an `Image` does not take into account its
+    `start` offset, but accessing a subimage by indexing an `Image` with a
+    `Box` does, and the `bbox` of the subimage is set to match its location
+    within the original image.
+    """
+
     def __init__(
         self,
         array_or_fill: np.ndarray | int | float = 0,
         /,
         *,
         bbox: Box | None = None,
-        start: tuple[int, int] = (0, 0),
-        shape: tuple[int, int] | None = None,
+        start: tuple[int, ...] | None = None,
+        shape: tuple[int, ...] | None = None,
         unit: astropy.units.Unit | None = None,
         dtype: npt.DTypeLike | None = None,
     ):
@@ -45,10 +73,8 @@ class Image:
                 array = np.array(array_or_fill, dtype=dtype)
             else:
                 array = array_or_fill
-            if array.ndim != 2:
-                raise ValueError("Image array must be 2-d.")
             if bbox is None:
-                bbox = Box.from_shape(cast(tuple[int, int], array.shape), start=start)
+                bbox = Box.from_shape(array.shape, start=start)
             elif bbox.shape != array.shape:
                 raise ValueError(
                     f"Explicit bbox shape {bbox.shape} does not match array with shape {array.shape}."
@@ -61,6 +87,8 @@ class Image:
                 if shape is None:
                     raise TypeError("No bbox, shape, or array provided.")
                 bbox = Box.from_shape(shape, start=start)
+            elif shape is not None and shape != bbox.shape:
+                raise ValueError(f"Explicit shape {shape} does not match bbox shape {bbox.shape}.")
             array = np.full(bbox.shape, array_or_fill, dtype=dtype)
         self._array = array
         self._bbox = bbox
@@ -68,25 +96,29 @@ class Image:
 
     @property
     def array(self) -> np.ndarray:
+        """The low-level array.
+
+        Assigning to this attribute modifies the existing array in place; the
+        bounding box and underlying data pointer are never changed.
+        """
         return self._array
 
     @array.setter
     def array(self, value: np.ndarray) -> None:
-        self._array[:, :] = value
+        self._array[...] = value
 
     @property
     def unit(self) -> astropy.units.Unit | None:
+        """Units for the image's pixel values."""
         return self._unit
 
     @property
     def bbox(self) -> Box:
+        """Bounding box for the image."""
         return self._bbox
 
     def __getitem__(self, bbox: Box) -> Image:
-        return Image(
-            self.array[bbox.y.slice_within(self._bbox.y), bbox.x.slice_within(self._bbox.x)],
-            bbox=bbox,
-        )
+        return Image(self.array[bbox.slice_within(self._bbox)], bbox=bbox)
 
     @classmethod
     def __get_pydantic_core_schema__(
@@ -123,7 +155,7 @@ class Image:
             shape=list(self.array.shape),
             datatype=NumberType.from_numpy(self.array.dtype),
         )
-        return ImageReference.pack(data, cast(tuple[int, int], self.bbox.start), self.unit)
+        return ImageReference.pack(data, self.bbox.start, self.unit)
 
     @classmethod
     def __get_pydantic_json_schema__(
@@ -133,13 +165,27 @@ class Image:
 
 
 class ImageReference(pydantic.BaseModel):
+    """Pydantic model used to represent the serialized form of an `Image`."""
+
     data: asdf_utils.QuantityModel | asdf_utils.ArrayModel
-    start: tuple[int, int]
+    start: tuple[int, ...]
 
     @classmethod
     def pack(
-        cls, array_model: asdf_utils.ArrayModel, start: tuple[int, int], unit: asdf_utils.Unit | None
+        cls, array_model: asdf_utils.ArrayModel, start: tuple[int, ...], unit: asdf_utils.Unit | None
     ) -> ImageReference:
+        """Construct an `ImageReference` from the components of a serialized
+        image.
+
+        Parameters
+        ----------
+        array_model
+            Serialized form of the underlying array.
+        start
+            Logical coordinates of the first pixel in the array.
+        unit, optional
+            Units for the image's pixel values.
+        """
         if unit is None:
             return cls.model_construct(data=array_model, start=start)
         return cls.model_construct(
@@ -147,6 +193,21 @@ class ImageReference(pydantic.BaseModel):
         )
 
     def unpack(self) -> tuple[asdf_utils.ArrayModel, asdf_utils.Unit | None]:
+        """Return the components of a serialized image from this model.
+
+        Returns
+        -------
+        array_model
+            Serialized form of the underlying array.
+        unit
+            Units for the image's pixel values.
+
+        Notes
+        -----
+        The ``start`` attribute is not included in the results because it is
+        directly accessible, rather than possibly nested under `data` as with
+        the other attributes.
+        """
         if isinstance(self.data, asdf_utils.QuantityModel):
             if not isinstance(self.data.value, asdf_utils.ArrayReferenceModel | asdf_utils.InlineArrayModel):
                 raise ValueError("Expected array quantity, not scalar.")

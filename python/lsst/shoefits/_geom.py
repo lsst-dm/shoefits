@@ -16,7 +16,6 @@ __all__ = (
     "Box",
 )
 
-import math
 from typing import ClassVar, final
 
 import numpy as np
@@ -159,13 +158,15 @@ Interval.factory = IntervalSliceFactory()
 
 
 class Box(pydantic.RootModel[tuple[Interval, ...]]):
+    """An axis-aligned [hyper]rectangular region."""
+
     model_config = pydantic.ConfigDict(frozen=True)
 
     factory: ClassVar[BoxSliceFactory]
 
     @classmethod
     def from_shape(cls, shape: tuple[int, ...], start: tuple[int, ...] | None = None) -> Box:
-        """Construct an interval from its size and optional start."""
+        """Construct a box from its shape and optional start."""
         if start is None:
             start = (0,) * len(shape)
         return Box(
@@ -176,38 +177,42 @@ class Box(pydantic.RootModel[tuple[Interval, ...]]):
 
     @property
     def start(self) -> tuple[int, ...]:
+        """Inclusive minimum point in the box."""
         return tuple([i.start for i in self.root])
 
     @property
     def stop(self) -> tuple[int, ...]:
+        """One past the maximum point in the box."""
         return tuple([i.stop for i in self.root])
 
     @property
     def min(self) -> tuple[int, ...]:
+        """Inclusive minimum point in the box."""
         return tuple([i.min for i in self.root])
 
     @property
     def max(self) -> tuple[int, ...]:
+        """Inclusive maximum point in the box."""
         return tuple([i.max for i in self.root])
 
     @property
-    def area(self) -> int:
-        return math.prod(self.shape)
-
-    @property
     def shape(self) -> tuple[int, ...]:
+        """Tuple holding the sizes of the intervals in all dimension."""
         return tuple([i.size for i in self.root])
 
     @property
     def x(self) -> Interval:
+        """Shortcut for the last dimension's interval."""
         return self.root[-1]
 
     @property
     def y(self) -> Interval:
+        """Shortcut for the second-to-last dimension's interval."""
         return self.root[-2]
 
     @property
     def z(self) -> Interval:
+        """Shortcut for the third-to-last dimension's interval."""
         return self.root[-3]
 
     def __str__(self) -> str:

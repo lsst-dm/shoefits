@@ -47,7 +47,7 @@ class NumberType(enum.StrEnum):
 
         Returns
         -------
-        scalar_type : `type`
+        scalar_type
             Numpy scalar type, e.g. `numpy.int16`.  Note that this inherits
             from `type`, not `numpy.dtype` (though a `numpy.dtype` instance
             can always be constructed from it).
