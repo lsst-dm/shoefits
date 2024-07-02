@@ -278,7 +278,7 @@ class ExposureInfo(pydantic.BaseModel):
 
 class MaskedImage(pydantic.BaseModel):
     image: Annotated[shf.Image, shf.FitsOptions(extname="image")] = pydantic.Field(frozen=True)
-    mask: Annotated[shf.Mask, shf.FitsOptions(extname="mask", mask_header_style=shf.MaskHeaderFormat.AFW)] = (
+    mask: Annotated[shf.Mask, shf.FitsOptions(extname="mask", mask_header_style=shf.MaskHeaderStyle.AFW)] = (
         pydantic.Field(frozen=True)
     )
     variance: Annotated[shf.Image, shf.FitsOptions(extname="variance")] = pydantic.Field(frozen=True)

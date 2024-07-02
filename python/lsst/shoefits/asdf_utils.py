@@ -159,7 +159,7 @@ class ArraySerialization:
         cls, model: ArrayModel, info: pydantic.ValidationInfo, x_dim: int = -2, y_dim: int = -1
     ) -> np.ndarray:
         if read_context := ReadContext.from_info(info):
-            return read_context.get_array(model, Point(x=0, y=0), x_dim=x_dim, y_dim=y_dim)
+            return read_context.get_array(model, Point.zero, x_dim=x_dim, y_dim=y_dim)
         match model:
             case ArrayReferenceModel():
                 raise ValueError("Serialized array is a reference, but no read context provided.")

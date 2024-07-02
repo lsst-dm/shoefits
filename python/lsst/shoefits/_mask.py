@@ -192,7 +192,7 @@ class Mask:
         data = asdf_utils.ArrayReferenceModel(
             source=source,
             shape=list(self.array.shape),
-            datatype=NumberType.from_numpy(self.array.dtype).checked_unsigned(),
+            datatype=NumberType.from_numpy(self.array.dtype).require_unsigned(),
         )
         return MaskReference(data=data, start=self.bbox.start, planes=list(self.schema))
 

@@ -26,7 +26,7 @@ import numpy as np
 import pydantic
 
 from . import keywords
-from ._fits_options import FitsCompression, FitsOptions, MaskHeaderFormat
+from ._fits_options import FitsCompression, FitsOptions, MaskHeaderStyle
 from ._geom import Point
 from ._write_context import WriteContext
 
@@ -235,7 +235,7 @@ class FitsWriteContext(WriteContext):
             options = FitsOptions()
         else:
             options = self._fits_options_stack[-1]
-        if options.mask_header_style is MaskHeaderFormat.AFW:
+        if options.mask_header_style is MaskHeaderStyle.AFW:
             for mask_plane_index, mask_plane in enumerate(schema):
                 if mask_plane is not None:
                     header.set(

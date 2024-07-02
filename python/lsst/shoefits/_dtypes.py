@@ -28,6 +28,8 @@ import numpy.typing as npt
 
 
 class NumberType(enum.StrEnum):
+    """Enumeration of array values types supported by the library."""
+
     uint8 = enum.auto()
     uint16 = enum.auto()
     uint32 = enum.auto()
@@ -40,13 +42,39 @@ class NumberType(enum.StrEnum):
     float64 = enum.auto()
 
     def to_numpy(self) -> type:
+        """Convert an enumeration member to the corresponding numpy scalar
+        type object.
+
+        Returns
+        -------
+        scalar_type : `type`
+            Numpy scalar type, e.g. `numpy.int16`.  Note that this inherits
+            from `type`, not `numpy.dtype` (though a `numpy.dtype` instance
+            can always be constructed from it).
+        """
         return getattr(np, self.value)
 
     @classmethod
     def from_numpy(cls, dtype: npt.DTypeLike) -> NumberType:
+        """Construct an enumeration member from anything that can be coerced
+        to `numpy.dtype`.
+
+        Parameters
+        ----------
+        dtype
+            Object convertible to `numpy.dtype`.
+
+        Returns
+        -------
+        member
+            Enumeration member.
+        """
         return cls(np.dtype(dtype).name)
 
-    def checked_unsigned(self) -> UnsignedIntegerType:
+    def require_unsigned(self) -> UnsignedIntegerType:
+        """Raise `TypeError` if this enumeration does not represent an
+        unsigned integer type, and return it if it does.
+        """
         if is_unsigned(self):
             return self
         raise TypeError(f"{self} is not an unsigned integer type.")
@@ -76,4 +104,5 @@ FloatType: TypeAlias = Union[Literal[NumberType.float32], Literal[NumberType.flo
 
 
 def is_unsigned(t: NumberType) -> TypeGuard[UnsignedIntegerType]:
+    """Test whether a `NumberType` corresponds to an unsigned integer type."""
     return np.dtype(t.to_numpy()).kind == "u"

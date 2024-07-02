@@ -99,7 +99,7 @@ def test_mask_fits_write() -> None:
     )
 
     class S(pydantic.BaseModel):
-        mask: Annotated[shf.Mask, shf.FitsOptions(extname=None, mask_header_style=shf.MaskHeaderFormat.AFW)]
+        mask: Annotated[shf.Mask, shf.FitsOptions(extname=None, mask_header_style=shf.MaskHeaderStyle.AFW)]
 
     s = S(mask=shf.Mask(bbox=shf.bounds[1:5, -2:6], schema=mask_schema))
     s.mask.array[0, 0, :] = mask_schema.bitmask("bad", "interpolated")

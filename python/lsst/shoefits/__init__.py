@@ -10,12 +10,13 @@
 # license that can be found in the LICENSE file.
 
 from . import asdf_utils, json_utils, keywords
+from ._dtypes import FloatType, IntegerType, NumberType, SignedIntegerType, UnsignedIntegerType, is_unsigned
 from ._fits_options import (
     ExportFitsHeaderKey,
     FitsCompression,
     FitsCompressionAlgorithm,
     FitsOptions,
-    MaskHeaderFormat,
+    MaskHeaderStyle,
     fits_header_exporter,
 )
 from ._fits_read_context import FitsReadContext
