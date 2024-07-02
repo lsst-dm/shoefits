@@ -23,7 +23,7 @@ import pydantic_core.core_schema as pcs
 
 from . import asdf_utils
 from ._dtypes import NumberType
-from ._geom import Box, Extent, Point
+from ._geom import Box
 from ._write_context import WriteContext, WriteError
 
 
@@ -35,8 +35,8 @@ class Image:
         /,
         *,
         bbox: Box | None = None,
-        start: Point = Point(x=0, y=0),
-        size: Extent | None = None,
+        start: tuple[int, int] = (0, 0),
+        shape: tuple[int, int] | None = None,
         unit: astropy.units.Unit | None = None,
         dtype: npt.DTypeLike | None = None,
     ):
@@ -45,21 +45,23 @@ class Image:
                 array = np.array(array_or_fill, dtype=dtype)
             else:
                 array = array_or_fill
+            if array.ndim != 2:
+                raise ValueError("Image array must be 2-d.")
             if bbox is None:
-                bbox = Box.from_size(Extent.from_shape(cast(tuple[int, int], array.shape)), start=start)
-            elif bbox.size.shape != array.shape:
+                bbox = Box.from_shape(cast(tuple[int, int], array.shape), start=start)
+            elif bbox.shape != array.shape:
                 raise ValueError(
-                    f"Explicit bbox size {bbox.size} does not match array with shape {array.shape}."
+                    f"Explicit bbox shape {bbox.shape} does not match array with shape {array.shape}."
                 )
-            if size is not None and size.shape != array.shape:
-                raise ValueError(f"Explicit size {size} does not match array with shape {array.shape}.")
+            if shape is not None and shape != array.shape:
+                raise ValueError(f"Explicit shape {shape} does not match array with shape {array.shape}.")
 
         else:
             if bbox is None:
-                if size is None:
-                    raise TypeError("No bbox, size, or array provided.")
-                bbox = Box.from_size(size, start=start)
-            array = np.full(bbox.size.shape, array_or_fill, dtype=dtype)
+                if shape is None:
+                    raise TypeError("No bbox, shape, or array provided.")
+                bbox = Box.from_shape(shape, start=start)
+            array = np.full(bbox.shape, array_or_fill, dtype=dtype)
         self._array = array
         self._bbox = bbox
         self._unit = unit
@@ -105,7 +107,11 @@ class Image:
     @classmethod
     def _from_reference(cls, reference: ImageReference, info: pydantic.ValidationInfo) -> Image:
         array_model, unit = reference.unpack()
-        array = asdf_utils.ArraySerialization.from_model(array_model, info)
+
+        def bbox_from_shape(shape: tuple[int, ...]) -> Box:
+            return Box.from_shape(shape, start=reference.start)
+
+        array = asdf_utils.ArraySerialization.from_model(array_model, info, bbox_from_shape=bbox_from_shape)
         return cls(array, start=reference.start, unit=unit)
 
     def _serialize(self, info: pydantic.SerializationInfo) -> ImageReference:
@@ -117,7 +123,7 @@ class Image:
             shape=list(self.array.shape),
             datatype=NumberType.from_numpy(self.array.dtype),
         )
-        return ImageReference.pack(data, self.bbox.start, self.unit)
+        return ImageReference.pack(data, cast(tuple[int, int], self.bbox.start), self.unit)
 
     @classmethod
     def __get_pydantic_json_schema__(
@@ -128,11 +134,11 @@ class Image:
 
 class ImageReference(pydantic.BaseModel):
     data: asdf_utils.QuantityModel | asdf_utils.ArrayModel
-    start: Point
+    start: tuple[int, int]
 
     @classmethod
     def pack(
-        cls, array_model: asdf_utils.ArrayModel, start: Point, unit: asdf_utils.Unit | None
+        cls, array_model: asdf_utils.ArrayModel, start: tuple[int, int], unit: asdf_utils.Unit | None
     ) -> ImageReference:
         if unit is None:
             return cls.model_construct(data=array_model, start=start)

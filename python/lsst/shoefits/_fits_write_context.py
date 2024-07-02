@@ -27,7 +27,6 @@ import pydantic
 
 from . import keywords
 from ._fits_options import FitsCompression, FitsOptions, MaskHeaderStyle
-from ._geom import Point
 from ._write_context import WriteContext
 
 if TYPE_CHECKING:
@@ -142,7 +141,7 @@ class FitsWriteContext(WriteContext):
             full_header.set("INHERIT", True)
             full_header.update(extension.extension_only_header)
             if extension.compression:
-                tile_shape = extension.compression.tile_size.shape + extension.array.shape[2:]
+                tile_shape = extension.compression.tile_shape + extension.array.shape[2:]
                 hdu = astropy.io.fits.CompImageHDU(
                     extension.array,
                     header=full_header,
@@ -187,7 +186,7 @@ class FitsWriteContext(WriteContext):
         self,
         label: keywords.FitsExtensionLabel | int,
         array: np.ndarray,
-        start: Point | None = None,
+        start: tuple[int, ...] | None = None,
         compression: FitsCompression | None = None,
         parent_header: astropy.io.fits.Header | None = None,
     ) -> FitsExtension:
@@ -220,13 +219,15 @@ class FitsWriteContext(WriteContext):
         self._primary_header.set(keywords.EXT_ADDRESS.format(ext_index), 0, "Address of extension data.")
         return extension
 
-    def _add_array_start_wcs(self, start: Point, header: astropy.io.fits.Header, wcs_name: str = "A") -> None:
+    def _add_array_start_wcs(
+        self, start: tuple[int, ...], header: astropy.io.fits.Header, wcs_name: str = "A"
+    ) -> None:
         header.set(f"CTYPE1{wcs_name}", "LINEAR", "Type of projection")
         header.set(f"CTYPE2{wcs_name}", "LINEAR", "Type of projection")
         header.set(f"CRPIX1{wcs_name}", 1.0, "Column Pixel Coordinate of Reference")
         header.set(f"CRPIX2{wcs_name}", 1.0, "Row Pixel Coordinate of Reference")
-        header.set(f"CRVAL1{wcs_name}", start.x, "Column pixel of Reference Pixel")
-        header.set(f"CRVAL2{wcs_name}", start.y, "Row pixel of Reference Pixel")
+        header.set(f"CRVAL1{wcs_name}", start[1], "Column pixel of Reference Pixel")
+        header.set(f"CRVAL2{wcs_name}", start[0], "Row pixel of Reference Pixel")
         header.set(f"CUNIT1{wcs_name}", "PIXEL", "Column unit")
         header.set(f"CUNIT2{wcs_name}", "PIXEL", "Row unit")
 

@@ -15,7 +15,7 @@ __all__ = ("Mask", "MaskPlane", "MaskSchema", "MaskReference")
 
 import dataclasses
 import math
-from collections.abc import Iterable, Iterator, Mapping
+from collections.abc import Callable, Iterable, Iterator, Mapping
 from typing import Any, cast
 
 import numpy as np
@@ -25,7 +25,8 @@ import pydantic_core.core_schema as pcs
 
 from . import asdf_utils
 from ._dtypes import NumberType
-from ._geom import Box, Extent, Point
+from ._geom import Box
+from ._read_context import ReadContext, ReadError
 from ._write_context import WriteContext, WriteError
 
 
@@ -111,31 +112,33 @@ class Mask:
         /,
         *,
         bbox: Box | None = None,
-        start: Point = Point(x=0, y=0),
-        size: Extent | None = None,
+        start: tuple[int, int] = (0, 0),
+        shape: tuple[int, int] | None = None,
         schema: MaskSchema,
     ):
         if isinstance(array_or_fill, np.ndarray):
             array = np.array(array_or_fill, dtype=schema.dtype)
+            if array.ndim != 3:
+                raise ValueError("Mask array must be 3-d.")
             if bbox is None:
-                bbox = Box.from_size(Extent.from_shape(cast(tuple[int, int], array.shape[:2])), start=start)
-            elif bbox.size.shape + (schema.mask_size,) != array.shape:
+                bbox = Box.from_shape(cast(tuple[int, int], array.shape[:2]), start=start)
+            elif bbox.shape + (schema.mask_size,) != array.shape:
                 raise ValueError(
-                    f"Explicit bbox size {bbox.size} and schema of size {schema.mask_size} do not "
+                    f"Explicit bbox shape {bbox.shape} and schema of size {schema.mask_size} do not "
                     f"match array with shape {array.shape}."
                 )
-            if size is not None and size.shape + (schema.mask_size,) != array.shape:
+            if shape is not None and shape + (schema.mask_size,) != array.shape:
                 raise ValueError(
-                    f"Explicit size {size} and schema of size {schema.mask_size} do "
+                    f"Explicit shape {shape} and schema of size {schema.mask_size} do "
                     f"not match array with shape {array.shape}."
                 )
 
         else:
             if bbox is None:
-                if size is None:
+                if shape is None:
                     raise TypeError("No bbox, size, or array provided.")
-                bbox = Box.from_size(size, start=start)
-            array = np.full(bbox.size.shape + (schema.mask_size,), array_or_fill, dtype=schema.dtype)
+                bbox = Box.from_shape(shape, start=start)
+            array = np.full(bbox.shape + (schema.mask_size,), array_or_fill, dtype=schema.dtype)
         self._array = array
         self._bbox = bbox
         self._schema = schema
@@ -158,7 +161,7 @@ class Mask:
 
     def __getitem__(self, bbox: Box) -> Mask:
         return Mask(
-            self.array[bbox.y.slice_within(self._bbox.y), bbox.x.slice_within(self._bbox.x)],
+            self.array[bbox.y.slice_within(self._bbox.y), bbox.x.slice_within(self._bbox.x), :],
             bbox=bbox,
             schema=self.schema,
         )
@@ -181,8 +184,30 @@ class Mask:
 
     @classmethod
     def _from_reference(cls, reference: MaskReference, info: pydantic.ValidationInfo) -> Mask:
-        array = asdf_utils.ArraySerialization.from_model(reference.data, info, x_dim=-2, y_dim=-3)
-        schema = MaskSchema(reference.planes, dtype=array.dtype)
+        schema = MaskSchema(reference.planes, dtype=reference.data.datatype.to_numpy())
+
+        def bbox_from_shape(shape: tuple[int, ...]) -> Box:
+            assert len(shape) == 3, "should be from a 3-d array"
+            if shape[2] != schema.mask_size:
+                raise ReadError(
+                    f"Mask array shape ends with {shape[2]}, not {schema.mask_size} as expected from schema."
+                )
+            return Box.from_shape(shape, start=reference.start + (0,))
+
+        slice_result: Callable[[Box], tuple[slice, ...]] | None = None
+        if read_context := ReadContext.from_info(info):
+            if (slice_bbox := read_context.get_parameter_bbox()) is not None:
+
+                def slice_result(full_bbox: Box) -> tuple[slice, ...]:
+                    return slice_bbox.slice_within(full_bbox) + (slice(None, None),)
+
+        array = asdf_utils.ArraySerialization.from_model(
+            reference.data,
+            info,
+            bbox_from_shape=bbox_from_shape,
+            slice_result=slice_result,
+        )
+
         return cls(array, start=reference.start, schema=schema)
 
     def _serialize(self, info: pydantic.SerializationInfo) -> MaskReference:
@@ -194,7 +219,9 @@ class Mask:
             shape=list(self.array.shape),
             datatype=NumberType.from_numpy(self.array.dtype).require_unsigned(),
         )
-        return MaskReference(data=data, start=self.bbox.start, planes=list(self.schema))
+        return MaskReference(
+            data=data, start=cast(tuple[int, int], self.bbox.start), planes=list(self.schema)
+        )
 
     @classmethod
     def __get_pydantic_json_schema__(
@@ -208,5 +235,5 @@ class Mask:
 
 class MaskReference(pydantic.BaseModel):
     data: asdf_utils.ArrayModel
-    start: Point
+    start: tuple[int, int]
     planes: list[MaskPlane | None]

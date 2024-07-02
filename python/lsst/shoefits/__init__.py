@@ -21,7 +21,7 @@ from ._fits_options import (
 )
 from ._fits_read_context import FitsReadContext
 from ._fits_write_context import FORMAT_VERSION, FitsWriteContext
-from ._geom import Box, Extent, Interval, Point, bounds
+from ._geom import Box, Interval
 from ._image import Image, ImageReference
 from ._mask import Mask, MaskPlane, MaskReference, MaskSchema
 from ._polymorphic import (

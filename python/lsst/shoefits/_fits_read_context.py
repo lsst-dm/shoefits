@@ -14,7 +14,7 @@ from __future__ import annotations
 __all__ = ("FitsReadContext",)
 
 import json
-from collections.abc import Iterator, Mapping
+from collections.abc import Callable, Iterator, Mapping
 from contextlib import contextmanager
 from typing import TYPE_CHECKING, Any, BinaryIO, TypeVar
 
@@ -23,9 +23,9 @@ import numpy as np
 import pydantic
 
 from . import asdf_utils, keywords
-from ._geom import Box, Extent, Point
+from ._geom import Box
 from ._polymorphic import PolymorphicAdapterRegistry
-from ._read_context import ReadContext, ReadError
+from ._read_context import ReadContext
 
 if TYPE_CHECKING:
     from .json_utils import JsonValue
@@ -42,6 +42,7 @@ class FitsReadContext(ReadContext):
         *,
         adapter_registry: PolymorphicAdapterRegistry,
     ):
+        super().__init__(parameters=parameters, polymorphic_adapter_registry=adapter_registry)
         self._stream = stream
         try:
             self._stream.fileno()
@@ -49,7 +50,6 @@ class FitsReadContext(ReadContext):
             self._stream_has_fileno = False
         else:
             self._stream_has_fileno = True
-        self._parameters = parameters or {}
         self._header = astropy.io.fits.Header()
         self._fits: astropy.io.fits.HDUList = astropy.io.fits.open(
             self._stream,
@@ -58,9 +58,7 @@ class FitsReadContext(ReadContext):
             cache=False,
         )
         self._read_json_and_addresses(self._fits[0])
-        self._adapter_registry = adapter_registry
         self._subheader_depth = 0
-        self._no_parameter_bbox_depth = 0
 
     def _read_json_and_addresses(self, hdu: astropy.io.fits.PrimaryHDU) -> None:
         # The tree size header is some future-proofing for the possibility of
@@ -90,34 +88,6 @@ class FitsReadContext(ReadContext):
     def seek_component(self, tree: JsonValue, component: str) -> JsonValue:
         return tree[component]  # type: ignore[call-overload,index]
 
-    def get_parameter_bbox(self, full_bbox: Box, parameters: Mapping[str, Any]) -> Box:
-        return parameters.get("bbox", full_bbox)
-
-    def apply_parameter_bbox_slice(
-        self,
-        full_bbox: Box,
-        sliceable: Any,
-        nd: int,
-        x_dim: int = -2,
-        y_dim: int = -1,
-    ) -> Any:
-        if (
-            self._no_parameter_bbox_depth == 0
-            and (bbox := self.get_parameter_bbox(full_bbox, self._parameters)) != full_bbox
-        ):
-            if not full_bbox.contains(bbox):
-                raise ReadError(f"Array has bbox={full_bbox}, which does not contain {bbox}.")
-            index = [slice(None)] * nd
-            index[x_dim] = bbox.x.slice_within(full_bbox.x)
-            index[y_dim] = bbox.y.slice_within(full_bbox.y)
-            return sliceable[tuple(index)]
-        else:
-            return sliceable[...]
-
-    @property
-    def polymorphic_adapter_registry(self) -> PolymorphicAdapterRegistry:
-        return self._adapter_registry
-
     @contextmanager
     def subheader(self) -> Iterator[None]:
         self._subheader_depth += 1
@@ -137,9 +107,8 @@ class FitsReadContext(ReadContext):
     def get_array(
         self,
         array_model: asdf_utils.ArrayModel,
-        start: Point,
-        x_dim: int = -1,
-        y_dim: int = -2,
+        bbox_from_shape: Callable[[tuple[int, ...]], Box] = Box.from_shape,
+        slice_result: Callable[[Box], tuple[slice, ...]] | None = None,
     ) -> np.ndarray:
         match array_model:
             case asdf_utils.ArrayReferenceModel(source=str(fits_source)) if fits_source.startswith("fits:"):
@@ -156,14 +125,18 @@ class FitsReadContext(ReadContext):
                 # convert the entire thing to an array and then (maybe) slice,
                 # whereas in other cases we do partial reads when slicing.
                 array: np.ndarray = np.array(data, dtype=type_enum.to_numpy())
-                full_bbox = Box.from_size(Extent(y=array.shape[y_dim], x=array.shape[x_dim]), start=start)
-                return self.apply_parameter_bbox_slice(full_bbox, array, array.ndim, x_dim, y_dim)
+                full_bbox = bbox_from_shape(array.shape)
+                if slice_result is None:
+                    return array
+                else:
+                    return array[slice_result(full_bbox)]
             case _:
                 raise AssertionError()
-        full_bbox = Box.from_size(Extent(y=array_model.shape[y_dim], x=array_model.shape[x_dim]), start=start)
-        array = self.apply_parameter_bbox_slice(
-            full_bbox, self._fits[hdu_index].section, len(array_model.shape), x_dim, y_dim
-        )
+        full_bbox = bbox_from_shape(tuple(array_model.shape))
+        if slice_result is None:
+            array = self._fits[hdu_index].data
+        else:
+            array = self._fits[hdu_index].section(slice_result(full_bbox))
         # Logic below tries to avoid unnecessary copies, but to avoid them
         # entirely, we'd have to move this to a compiled language.
         if not array.flags.aligned or not array.flags.writeable:

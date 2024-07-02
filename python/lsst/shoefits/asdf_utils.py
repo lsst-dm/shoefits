@@ -25,6 +25,7 @@ __all__ = (
     # not be imported directly from this module except from within the package.
 )
 
+from collections.abc import Callable
 from typing import Annotated, Any, Literal, TypeAlias, Union
 
 import astropy.time
@@ -34,7 +35,7 @@ import pydantic
 import pydantic_core.core_schema as pcs
 
 from ._dtypes import NumberType
-from ._geom import Point
+from ._geom import Box
 from ._read_context import ReadContext
 from ._write_context import WriteContext
 
@@ -156,10 +157,16 @@ class ArraySerialization:
 
     @classmethod
     def from_model(
-        cls, model: ArrayModel, info: pydantic.ValidationInfo, x_dim: int = -2, y_dim: int = -1
+        cls,
+        model: ArrayModel,
+        info: pydantic.ValidationInfo,
+        bbox_from_shape: Callable[[tuple[int, ...]], Box] = Box.from_shape,
+        slice_result: Callable[[Box], tuple[slice, ...]] | None = None,
     ) -> np.ndarray:
         if read_context := ReadContext.from_info(info):
-            return read_context.get_array(model, Point.zero, x_dim=x_dim, y_dim=y_dim)
+            if slice_result is None and (slice_bbox := read_context.get_parameter_bbox()) is not None:
+                slice_result = slice_bbox.slice_within
+            return read_context.get_array(model, bbox_from_shape, slice_result)
         match model:
             case ArrayReferenceModel():
                 raise ValueError("Serialized array is a reference, but no read context provided.")

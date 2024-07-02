@@ -121,7 +121,7 @@ def assert_stamp_lists_equal(a: afw.StampList, b: afw.StampList) -> None:
 
 def test_exposure_round_trip() -> None:
     rng = np.random.RandomState(5)
-    bbox = shf.bounds[-3:52, 20:61]
+    bbox = shf.Box.factory[-3:52, 20:61]
     exposure_in = afw.Exposure.make_example(bbox, rng=rng)
     stream = BytesIO()
     shf.FitsWriteContext(adapter_registry).write(exposure_in, stream, indent=2)
@@ -133,7 +133,7 @@ def test_exposure_round_trip() -> None:
 
 def test_stamp_list_round_trip() -> None:
     rng = np.random.RandomState(5)
-    bbox = shf.bounds[-3:52, 20:61]
+    bbox = shf.Box.factory[-3:52, 20:61]
     stamp_list_in = afw.StampList.make_example(bbox, rng=rng)
     stream = BytesIO()
     shf.FitsWriteContext(adapter_registry).write(stamp_list_in, stream, indent=2)

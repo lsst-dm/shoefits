@@ -33,8 +33,12 @@ def test_image_fits_write() -> None:
         alpha: Annotated[float, shf.ExportFitsHeaderKey("ALPHA")]
         beta: int
 
-    s = S(image=shf.Image(0.0, bbox=shf.bounds[1:3, 2:6], unit=u.nJy, dtype=np.int16), alpha=4.125, beta=-2)
-    x_grid, y_grid = s.image.bbox.meshgrid
+    s = S(
+        image=shf.Image(0.0, bbox=shf.Box.factory[1:3, 2:6], unit=u.nJy, dtype=np.int16),
+        alpha=4.125,
+        beta=-2,
+    )
+    x_grid, y_grid = np.meshgrid(s.image.bbox.x.arange, s.image.bbox.y.arange)
     s.image.array[:, :] = x_grid * 10 + y_grid
     stream = BytesIO()
     shf.FitsWriteContext(adapter_registry).write(s, stream)
@@ -66,7 +70,7 @@ def test_image_fits_write() -> None:
                 },
                 "unit": "nJy",
             },
-            "start": {"x": 2, "y": 1},
+            "start": [1, 2],
         }:
             pass
         case _:
@@ -101,7 +105,7 @@ def test_mask_fits_write() -> None:
     class S(pydantic.BaseModel):
         mask: Annotated[shf.Mask, shf.FitsOptions(extname=None, mask_header_style=shf.MaskHeaderStyle.AFW)]
 
-    s = S(mask=shf.Mask(bbox=shf.bounds[1:5, -2:6], schema=mask_schema))
+    s = S(mask=shf.Mask(bbox=shf.Box.factory[1:5, -2:6], schema=mask_schema))
     s.mask.array[0, 0, :] = mask_schema.bitmask("bad", "interpolated")
     s.mask.array[0, 2, :] = mask_schema.bitmask("saturated")
     s.mask.array[1, 3, :] = mask_schema.bitmask("interpolated", "fill5")
@@ -132,7 +136,7 @@ def test_mask_fits_write() -> None:
                 "datatype": "uint8",
                 "byteorder": "big",
             },
-            "start": {"x": -2, "y": 1},
+            "start": [1, -2],
             "planes": list(planes_list),
         }:
             pass

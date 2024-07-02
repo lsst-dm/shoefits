@@ -13,7 +13,7 @@ from __future__ import annotations
 
 __all__ = ("TestingWriteContext", "TestingReadContext")
 
-from collections.abc import Iterator, Mapping
+from collections.abc import Callable, Iterator, Mapping
 from contextlib import contextmanager
 from typing import TYPE_CHECKING
 
@@ -21,7 +21,7 @@ import numpy as np
 
 from .. import asdf_utils
 from .._fits_options import FitsOptions
-from .._geom import Point
+from .._geom import Box
 from .._image import Image
 from .._mask import Mask
 from .._polymorphic import PolymorphicAdapterRegistry
@@ -95,12 +95,8 @@ class TestingReadContext(ReadContext):
         adapter_registry: PolymorphicAdapterRegistry,
         arrays: Mapping[str | int, np.ndarray],
     ):
-        self._adapter_registry = adapter_registry
+        super().__init__(polymorphic_adapter_registry=adapter_registry)
         self.arrays = arrays
-
-    @property
-    def polymorphic_adapter_registry(self) -> PolymorphicAdapterRegistry:
-        return self._adapter_registry
 
     @contextmanager
     def subheader(self) -> Iterator[None]:
@@ -113,10 +109,10 @@ class TestingReadContext(ReadContext):
     def get_array(
         self,
         array_model: asdf_utils.ArrayModel,
-        start: Point,
-        x_dim: int = -1,
-        y_dim: int = -2,
+        bbox_from_shape: Callable[[tuple[int, ...]], Box] = Box.from_shape,
+        slice_result: Callable[[Box], tuple[slice, ...]] | None = None,
     ) -> np.ndarray:
+        assert slice_result is None
         match array_model:
             case asdf_utils.InlineArrayModel():
                 return np.array(array_model.data, dtype=array_model.datatype.to_numpy())

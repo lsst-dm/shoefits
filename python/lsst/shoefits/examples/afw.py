@@ -117,8 +117,8 @@ class ChebyshevBoundedField(BoundedField):
     @classmethod
     def make_linear(cls, bbox: shf.Box, z: float, dz_dx: float, dz_dy: float) -> ChebyshevBoundedField:
         to_chebyshev_domain = AffineTransform(
-            xx=2.0 / bbox.size.x,
-            yy=2.0 / bbox.size.y,
+            xx=2.0 / bbox.x.size,
+            yy=2.0 / bbox.y.size,
             x=-bbox.x.center,
             y=-bbox.y.center,
         )
@@ -343,11 +343,11 @@ class MaskedImage(pydantic.BaseModel):
             ]
         )
         result = cls.from_bbox(bbox, mask_schema, dtype=np.int16, **kwargs)
-        result.image.array = np.round(rng.randn(*result.bbox.size.shape) * 10)
+        result.image.array = np.round(rng.randn(*result.bbox.shape) * 10)
         result.mask.array |= np.multiply.outer(result.image.array > 10.0, mask_schema.bitmask("DETECTED"))
         result.mask.array |= np.multiply.outer(result.image.array > 20.0, mask_schema.bitmask("SAT"))
         result.mask.array |= np.multiply.outer(
-            rng.randn(*result.bbox.size.shape) > 2.0, mask_schema.bitmask("SAT")
+            rng.randn(*result.bbox.shape) > 2.0, mask_schema.bitmask("SAT")
         )
         return result
 
@@ -383,8 +383,10 @@ class StampList(pydantic.BaseModel):
         box_y = rng.randint(bbox.y.start, bbox.y.stop, size=(5, 2))
         for n in range(5):
             bbox = shf.Box(
-                x=shf.Interval.hull(*box_x[n, :]),
-                y=shf.Interval.hull(*box_y[n, :]),
+                root=(
+                    shf.Interval.hull(*box_y[n, :]),
+                    shf.Interval.hull(*box_x[n, :]),
+                )
             )
             result.stamps.append(
                 Stamp.from_section(

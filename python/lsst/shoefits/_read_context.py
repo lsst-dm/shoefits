@@ -14,15 +14,17 @@ from __future__ import annotations
 __all__ = ("ReadContext", "ReadError")
 
 from abc import ABC, abstractmethod
+from collections.abc import Callable, Mapping
 from contextlib import AbstractContextManager
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
 import pydantic
 
+from ._geom import Box
+
 if TYPE_CHECKING:
     from . import asdf_utils
-    from ._geom import Point
     from ._polymorphic import PolymorphicAdapterRegistry
 
 
@@ -31,6 +33,16 @@ class ReadError(RuntimeError):
 
 
 class ReadContext(ABC):
+    def __init__(
+        self,
+        parameters: Mapping[str, Any] | None = None,
+        *,
+        polymorphic_adapter_registry: PolymorphicAdapterRegistry,
+    ):
+        self.parameters = parameters or {}
+        self.polymorphic_adapter_registry = polymorphic_adapter_registry
+        self._no_parameter_bbox_depth = 0
+
     @staticmethod
     def from_info(info: pydantic.ValidationInfo) -> ReadContext | None:
         if info.context is None:
@@ -43,11 +55,6 @@ class ReadContext(ABC):
         mapping["shoefits.read_context"] = self
         return mapping
 
-    @property
-    @abstractmethod
-    def polymorphic_adapter_registry(self) -> PolymorphicAdapterRegistry:
-        raise NotImplementedError()
-
     @abstractmethod
     def subheader(self) -> AbstractContextManager[None]:
         raise NotImplementedError()
@@ -56,12 +63,16 @@ class ReadContext(ABC):
     def no_parameter_bbox(self) -> AbstractContextManager[None]:
         raise NotImplementedError()
 
+    def get_parameter_bbox(self) -> Box | None:
+        if self._no_parameter_bbox_depth == 0:
+            return self.parameters.get("bbox")
+        return None
+
     @abstractmethod
     def get_array(
         self,
         array_model: asdf_utils.ArrayModel,
-        start: Point,
-        x_dim: int = -1,
-        y_dim: int = -2,
+        bbox_from_shape: Callable[[tuple[int, ...]], Box] = Box.from_shape,
+        slice_result: Callable[[Box], tuple[slice, ...]] | None = None,
     ) -> np.ndarray:
         raise NotImplementedError()

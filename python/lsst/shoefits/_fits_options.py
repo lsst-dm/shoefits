@@ -29,7 +29,6 @@ import astropy.io.fits
 import pydantic
 import pydantic_core.core_schema as pcs
 
-from ._geom import Extent
 from ._read_context import ReadContext
 from ._write_context import WriteContext
 
@@ -44,7 +43,7 @@ class FitsCompressionAlgorithm(enum.StrEnum):
 
 @dataclasses.dataclass
 class FitsCompression:
-    tile_size: Extent
+    tile_shape: tuple[int, int]
     algorithm: FitsCompressionAlgorithm = FitsCompressionAlgorithm.GZIP_2
 
 
