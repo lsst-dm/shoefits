@@ -88,6 +88,12 @@ class FitsReadContext(ReadContext):
     def seek_component(self, tree: JsonValue, component: str) -> JsonValue:
         return tree[component]  # type: ignore[call-overload,index]
 
+    @property
+    def primary_header(self) -> astropy.io.fits.Header | None:
+        if self._subheader_depth == 0:
+            return self._header
+        return None
+
     @contextmanager
     def subheader(self) -> Iterator[None]:
         self._subheader_depth += 1
