@@ -17,13 +17,13 @@ from collections.abc import Callable, Iterator, Mapping
 from contextlib import contextmanager
 from typing import TYPE_CHECKING
 
+import astropy.io.fits
 import numpy as np
 
 from .. import asdf_utils
+from .._dtypes import NumberType
 from .._fits_options import FitsOptions
 from .._geom import Box
-from .._image import Image
-from .._mask import Mask
 from .._polymorphic import PolymorphicAdapterRegistry
 from .._read_context import ReadContext
 from .._write_context import WriteContext
@@ -41,13 +41,14 @@ class TestingWriteContext(WriteContext):
 
     def __init__(self, adapter_registry: PolymorphicAdapterRegistry):
         self._adapter_registry = adapter_registry
-        self.images: dict[str | int, Image] = {}
-        self.masks: dict[str | int, Mask] = {}
         self.arrays: dict[str | int, np.ndarray] = {}
 
     @property
     def polymorphic_adapter_registry(self) -> PolymorphicAdapterRegistry:
         return self._adapter_registry
+
+    def get_fits_write_options(self) -> FitsOptions | None:
+        return None
 
     @contextmanager
     def fits_write_options(self, options: FitsOptions) -> Iterator[None]:
@@ -65,22 +66,16 @@ class TestingWriteContext(WriteContext):
     def export_header_update(self, header: astropy.io.fits.Header, for_read: bool = False) -> None:
         pass
 
-    def add_image(self, image: Image) -> str | int:
-        key = self.add_array(image.array)
-        self.images[key] = image
-        return key
-
-    def add_mask(self, mask: Mask) -> str | int:
-        key = self.add_array(mask.array)
-        self.masks[key] = mask
-        return key
-
-    def add_array(self, array: np.ndarray) -> str | int:
+    def add_array(
+        self, array: np.ndarray, header: astropy.io.fits.Header | None = None
+    ) -> asdf_utils.ArrayReferenceModel:
         key: str | int = len(self.arrays)
         if key % 2:
             key = str(key)
         self.arrays[key] = array
-        return key
+        return asdf_utils.ArrayReferenceModel(
+            source=key, shape=list(array.shape), datatype=NumberType.from_numpy(array.dtype)
+        )
 
 
 class TestingReadContext(ReadContext):

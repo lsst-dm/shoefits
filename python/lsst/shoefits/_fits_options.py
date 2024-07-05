@@ -23,14 +23,18 @@ __all__ = (
 import dataclasses
 import enum
 from collections.abc import Callable
-from typing import Any, TypeVar
+from typing import TYPE_CHECKING, Any, TypeVar
 
 import astropy.io.fits
 import pydantic
 import pydantic_core.core_schema as pcs
 
+from . import keywords
 from ._read_context import ReadContext
 from ._write_context import WriteContext
+
+if TYPE_CHECKING:
+    from ._mask import MaskSchema
 
 
 class FitsCompressionAlgorithm(enum.StrEnum):
@@ -176,6 +180,41 @@ class FitsOptions:
                 return handler(obj)
         else:
             return handler(obj)
+
+    def add_array_start_wcs(
+        self, header: astropy.io.fits.Header, start: tuple[int, ...], wcs_name: str = "A"
+    ) -> None:
+        """Modify a FITS header to include a WCS that applies an integer
+        offset.
+
+        Parameters
+        ----------
+        header
+            Header to modify in place.
+        start
+            Tuple of offset values.  These are the same order as the
+            corresponding array's dimensions, which is the reverse of the
+            dimensions according to FITS (since FITS uses column-major storage
+            while numpy defaults to row-major storage).
+        wcs_name, optional
+            Single-character FITS WCS name suffix.
+        """
+        for i, s in enumerate(reversed(start)):
+            header.set(f"CTYPE{i + 1}{wcs_name}", "LINEAR", "Type of projection")
+            header.set(f"CRPIX{i + 1}{wcs_name}", 1.0)
+            header.set(f"CRVAL{i + 1}{wcs_name}", s)
+            header.set(f"CUNIT{i + 1}{wcs_name}", "PIXEL")
+
+    def add_mask_schema_header(self, header: astropy.io.fits.Header, schema: MaskSchema) -> None:
+        """Modify a FITS header to include a description of a `MaskSchema`."""
+        if self.mask_header_style is MaskHeaderStyle.AFW:
+            for mask_plane_index, mask_plane in enumerate(schema):
+                if mask_plane is not None:
+                    header.set(
+                        keywords.AFW_MASK_PLANE.format(mask_plane.name.upper()),
+                        mask_plane_index,
+                        mask_plane.description,
+                    )
 
 
 @dataclasses.dataclass

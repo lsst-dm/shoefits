@@ -155,8 +155,9 @@ def test_mask_fits_write() -> None:
     np.testing.assert_array_equal(array, s.mask.array)
     # Check that the image HDU has the right data and header.
     assert hdu_list[1].header["EXTLEVEL"] == 1
-    assert hdu_list[1].header["CRVAL1A"] == -2
-    assert hdu_list[1].header["CRVAL2A"] == 1
+    assert hdu_list[1].header["CRVAL1A"] == 0
+    assert hdu_list[1].header["CRVAL2A"] == -2
+    assert hdu_list[1].header["CRVAL3A"] == 1
     assert hdu_list[1].header["MP_BAD"] == 0
     assert hdu_list[1].header["MP_INTERPOLATED"] == 2
     np.testing.assert_array_equal(hdu_list[1].data, s.mask.array)

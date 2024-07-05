@@ -18,13 +18,13 @@ import math
 from collections.abc import Callable, Iterable, Iterator, Mapping
 from typing import Any
 
+import astropy.io.fits
 import numpy as np
 import numpy.typing as npt
 import pydantic
 import pydantic_core.core_schema as pcs
 
 from . import asdf_utils
-from ._dtypes import NumberType
 from ._geom import Box
 from ._read_context import ReadContext, ReadError
 from ._write_context import WriteContext, WriteError
@@ -312,12 +312,12 @@ class Mask:
     def _serialize(self, info: pydantic.SerializationInfo) -> MaskReference:
         if (write_context := WriteContext.from_info(info)) is None:
             raise WriteError("Cannot write mask without WriteContext in Pydantic SerializationInfo.")
-        source = write_context.add_mask(self)
-        data = asdf_utils.ArrayReferenceModel(
-            source=source,
-            shape=list(self.array.shape),
-            datatype=NumberType.from_numpy(self.array.dtype).require_unsigned(),
-        )
+        header: astropy.io.fits.Header | None = None
+        if options := write_context.get_fits_write_options():
+            header = astropy.io.fits.Header()
+            options.add_array_start_wcs(header, self.bbox.start + (0,))
+            options.add_mask_schema_header(header, self.schema)
+        data = write_context.add_array(self.array, header)
         return MaskReference(data=data, start=self.bbox.start, planes=list(self.schema))
 
     @classmethod

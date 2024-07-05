@@ -15,6 +15,7 @@ __all__ = ("Image", "ImageReference")
 
 from typing import Any, final
 
+import astropy.io.fits
 import astropy.units
 import numpy as np
 import numpy.typing as npt
@@ -22,7 +23,6 @@ import pydantic
 import pydantic_core.core_schema as pcs
 
 from . import asdf_utils
-from ._dtypes import NumberType
 from ._geom import Box
 from ._write_context import WriteContext, WriteError
 
@@ -149,12 +149,13 @@ class Image:
     def _serialize(self, info: pydantic.SerializationInfo) -> ImageReference:
         if (write_context := WriteContext.from_info(info)) is None:
             raise WriteError("Cannot write image without WriteContext in Pydantic SerializationInfo.")
-        source = write_context.add_image(self)
-        data = asdf_utils.ArrayReferenceModel(
-            source=source,
-            shape=list(self.array.shape),
-            datatype=NumberType.from_numpy(self.array.dtype),
-        )
+        header: astropy.io.fits.Header | None = None
+        if options := write_context.get_fits_write_options():
+            header = astropy.io.fits.Header()
+            options.add_array_start_wcs(header, self.bbox.start)
+            if self.unit is not None:
+                header["BUNIT"] = self.unit.to_string(format="fits")
+        data = write_context.add_array(self.array, header)
         return ImageReference.pack(data, self.bbox.start, self.unit)
 
     @classmethod

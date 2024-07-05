@@ -180,8 +180,7 @@ class ArraySerialization:
         if write_context is None:
             return InlineArrayModel(data=array.tolist(), datatype=datatype)
         else:
-            source = write_context.add_array(array)
-            return ArrayReferenceModel(source=source, shape=list(array.shape), datatype=datatype)
+            return write_context.add_array(array, None)
 
     @classmethod
     def serialize(

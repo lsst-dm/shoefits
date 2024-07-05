@@ -23,9 +23,8 @@ import pydantic
 
 if TYPE_CHECKING:
     from ._fits_options import FitsOptions
-    from ._image import Image
-    from ._mask import Mask
     from ._polymorphic import PolymorphicAdapterRegistry
+    from .asdf_utils import ArrayModel
 
 
 class WriteError(RuntimeError):
@@ -92,6 +91,14 @@ class WriteContext(ABC):
         raise NotImplementedError()
 
     @abstractmethod
+    def get_fits_write_options(self) -> FitsOptions | None:
+        """Return the current `FitsOptions`.
+
+        Non-FITS implementations should return `None`.
+        """
+        raise NotImplementedError()
+
+    @abstractmethod
     def fits_write_options(self, options: FitsOptions) -> AbstractContextManager[None]:
         """Return a context manager that applies FITS-specific write options
         to this object any any nested under it.
@@ -150,26 +157,21 @@ class WriteContext(ABC):
         raise NotImplementedError()
 
     @abstractmethod
-    def add_image(self, image: Image) -> str | int:
-        """Store an image and return a string or integer handle to save in its
-        place.
+    def add_array(self, array: np.ndarray, header: astropy.io.fits.Header | None = None) -> ArrayModel:
+        """Write an array.
 
         Parameters
         ----------
-        image
-            Image to save.
+        array
+            Array to save.
+        header, optional
+            Header entries to save along with this array.  Ignored by non-FITS
+            implementations.
 
         Returns
         -------
-        handle
-            A string or integer ID that can be used to read back the image.
+        array_model
+            A Pydantic model that either stores array values inline or points
+            to an out-of-tree storage location.
         """
-        raise NotImplementedError()
-
-    @abstractmethod
-    def add_mask(self, mask: Mask) -> str | int:
-        raise NotImplementedError()
-
-    @abstractmethod
-    def add_array(self, array: np.ndarray) -> str | int:
         raise NotImplementedError()
