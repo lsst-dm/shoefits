@@ -45,6 +45,13 @@ class _SerializedInterval(TypedDict):
 class Interval:
     """A 1-d integer interval with positive size.
 
+    Parameters
+    ----------
+    start
+        Inclusive minimum point in the interval.
+    stop
+        One past the maximum point in the interval.
+
     Notes
     -----
     Adding or subtracting an `int` from an interval returns a shifted interval.
@@ -222,7 +229,13 @@ Interval.factory = IntervalSliceFactory()
 
 
 class Box(Sequence[Interval]):
-    """An axis-aligned [hyper]rectangular region."""
+    """An axis-aligned [hyper]rectangular region.
+
+    Parameters
+    ----------
+    *args
+        Intervals for each dimension.
+    """
 
     def __init__(self, *args: Interval):
         self._intervals = tuple(args)

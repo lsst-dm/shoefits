@@ -126,7 +126,7 @@ def test_exposure_round_trip() -> None:
     stream = BytesIO()
     shf.FitsWriteContext(adapter_registry).write(exposure_in, stream, indent=2)
     stream.seek(0)
-    reader = shf.FitsReadContext(stream, adapter_registry=adapter_registry)
+    reader = shf.FitsReadContext(stream, polymorphic_adapter_registry=adapter_registry)
     exposure_out = reader.read(afw.Exposure)
     assert_exposures_equal(exposure_in, exposure_out)
 
@@ -138,6 +138,6 @@ def test_stamp_list_round_trip() -> None:
     stream = BytesIO()
     shf.FitsWriteContext(adapter_registry).write(stamp_list_in, stream, indent=2)
     stream.seek(0)
-    reader = shf.FitsReadContext(stream, adapter_registry=adapter_registry)
+    reader = shf.FitsReadContext(stream, polymorphic_adapter_registry=adapter_registry)
     stamp_list_out = reader.read(afw.StampList)
     assert_stamp_lists_equal(stamp_list_in, stamp_list_out)

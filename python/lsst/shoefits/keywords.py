@@ -9,6 +9,8 @@
 # Use of this source code is governed by a 3-clause BSD-style
 # license that can be found in the LICENSE file.
 
+"""Constants and utility code for FITS headers written by this package."""
+
 from __future__ import annotations
 
 __all__ = ()
@@ -28,6 +30,8 @@ AFW_MASK_PLANE = "HIERARCH MP_{}"
 
 @dataclasses.dataclass
 class FitsExtensionLabel:
+    """A FITS EXTNAME and EXTVER header key combination."""
+
     extname: str
     extver: int | None
 
@@ -38,11 +42,13 @@ class FitsExtensionLabel:
         return result
 
     def update_header(self, header: astropy.io.fits.Header) -> None:
+        """Modify a header in place with these keys."""
         header["EXTNAME"] = self.extname
         if self.extver is not None:
             header["EXTVER"] = self.extver
 
     @classmethod
     def parse(cls, s: str) -> Self:
+        """Parse the string representation of this type into a new instance."""
         extname, _, raw_extver = s.partition(",")
         return cls(extname=extname, extver=int(raw_extver) if raw_extver else None)

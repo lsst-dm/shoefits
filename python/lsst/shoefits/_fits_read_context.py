@@ -16,7 +16,7 @@ __all__ = ("FitsReadContext",)
 import json
 from collections.abc import Callable, Iterator, Mapping
 from contextlib import contextmanager
-from typing import TYPE_CHECKING, Any, BinaryIO, TypeVar
+from typing import TYPE_CHECKING, Any, BinaryIO
 
 import astropy.io.fits
 import numpy as np
@@ -31,18 +31,42 @@ if TYPE_CHECKING:
     from .json_utils import JsonValue
 
 
-_M = TypeVar("_M", bound=pydantic.BaseModel)
-
-
 class FitsReadContext(ReadContext):
+    """A `ReadContext` implementation for FITS files.
+
+    Parameters
+    ----------
+    stream
+        Stream to read from.  Must be opened for binary input and must support
+        seeks.
+    parameters, optional
+        String-keyed mapping with read options (usually ways to specify
+        partial reads, such as subimages).
+    polymorphic_adapter_registry
+        Registry of polymorphic adapters that can be used to read fields
+        annotated with `Polymorphic`.
+
+    Notes
+    -----
+    Along with `FitsWriteContext`, this defines a FITS-based file format in
+    which the primary HDU is a 1-d uint8 array holding a UTF-8 JSON tree.
+    Extension HDUs are used to store numeric arrays, including `Image` and
+    `Mask` nested within the tree.
+
+    Constructing an instance of this class causes the primary HDU to be read
+    from the given stream.  The `read` method can then be called to invoke
+    the Pydantic validation machinery on the JSON tree, which will read arrays
+    from other extensions as needed.
+    """
+
     def __init__(
         self,
         stream: BinaryIO,
         parameters: Mapping[str, Any] | None = None,
         *,
-        adapter_registry: PolymorphicAdapterRegistry,
+        polymorphic_adapter_registry: PolymorphicAdapterRegistry,
     ):
-        super().__init__(parameters=parameters, polymorphic_adapter_registry=adapter_registry)
+        super().__init__(parameters=parameters, polymorphic_adapter_registry=polymorphic_adapter_registry)
         self._stream = stream
         try:
             self._stream.fileno()
@@ -57,13 +81,10 @@ class FitsReadContext(ReadContext):
             memmap=False,
             cache=False,
         )
-        self._read_json_and_addresses(self._fits[0])
-        self._subheader_depth = 0
-
-    def _read_json_and_addresses(self, hdu: astropy.io.fits.PrimaryHDU) -> None:
         # The tree size header is some future-proofing for the possibility of
         # writing ASDF data blacks after the tree as part of the same HDU.  At
         # present, it's identical to NAXIS1.
+        hdu = self._fits[0]
         tree_size = hdu.header.pop(keywords.TREE_SIZE)
         self._tree: JsonValue = json.loads(hdu.section[:tree_size].tobytes().decode())
         # Strip out extension array-data addresses, since we don't use them at
@@ -78,7 +99,26 @@ class FitsReadContext(ReadContext):
         self._header.update(hdu.header)
         self._header.strip()
 
-    def read(self, model_type: type[_M], component: str | None = None) -> Any:
+        self._subheader_depth = 0
+
+    def read(self, model_type: type[pydantic.BaseModel], component: str | None = None) -> Any:
+        """Deserialize the stream.
+
+        Parameters
+        ----------
+        model_type
+            The type of the object serialized to the ``stream`` passed at
+            construction, and if ``component=None`` the type of the object
+            returned.  Must be a subclass of `pydantic.BaseModel`.
+        component, optional
+            The name of a component of the object to read instead of the full
+            thing.
+
+        Returns
+        -------
+        obj
+            The loaded object.
+        """
         if component is None:
             tree = self._tree
         else:
@@ -86,16 +126,25 @@ class FitsReadContext(ReadContext):
         return model_type.model_validate(tree, context=self.inject())
 
     def seek_component(self, tree: JsonValue, component: str) -> JsonValue:
+        """Access the raw JSON subtree that corresponds to a component.
+
+        This is a hook that allows derived classes to override the
+        interpretation of the ``component`` argument to `read`.  The default
+        implementation assumes a top-level JSON mapping key with the name of
+        each component.
+        """
         return tree[component]  # type: ignore[call-overload,index]
 
     @property
     def primary_header(self) -> astropy.io.fits.Header | None:
+        # Docstring inherited.
         if self._subheader_depth == 0:
             return self._header
         return None
 
     @contextmanager
     def subheader(self) -> Iterator[None]:
+        # Docstring inherited.
         self._subheader_depth += 1
         try:
             yield
@@ -104,6 +153,7 @@ class FitsReadContext(ReadContext):
 
     @contextmanager
     def no_parameter_bbox(self) -> Iterator[None]:
+        # Docstring inherited.
         self._no_parameter_bbox_depth += 1
         try:
             yield
@@ -116,6 +166,7 @@ class FitsReadContext(ReadContext):
         bbox_from_shape: Callable[[tuple[int, ...]], Box] = Box.from_shape,
         slice_result: Callable[[Box], tuple[slice, ...]] | None = None,
     ) -> np.ndarray:
+        # Docstring inherited.
         match array_model:
             case asdf_utils.ArrayReferenceModel(source=str(fits_source)) if fits_source.startswith("fits:"):
                 fits_source = fits_source.removeprefix("fits:")
@@ -125,7 +176,7 @@ class FitsReadContext(ReadContext):
                     name, ver = fits_source.split(",")
                     hdu_index = self._fits.index_of((name, int(ver)))
             case asdf_utils.ArrayReferenceModel(source=int()):
-                raise NotImplementedError("ASDF blocks not supported by this reader.")
+                raise NotImplementedError("ASDF blocks are not supported by this reader.")
             case asdf_utils.InlineArrayModel(data=data, datatype=type_enum):
                 # Inline arrays take a different code path because we have to
                 # convert the entire thing to an array and then (maybe) slice,
@@ -150,11 +201,3 @@ class FitsReadContext(ReadContext):
         if not array.dtype.isnative:
             array = array.newbyteorder().byteswap(inplace=True)
         return array
-
-    def _read_array1d_from_stream(self, dtype: np.dtype, address: int, count: int) -> np.ndarray:
-        self._stream.seek(address)
-        if self._stream_has_fileno:
-            return np.fromfile(self._stream, dtype=dtype, count=count)
-        else:
-            buffer = self._stream.read(dtype.itemsize * count)
-            return np.frombuffer(buffer, dtype=dtype, count=count)

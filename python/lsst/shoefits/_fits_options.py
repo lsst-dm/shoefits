@@ -64,7 +64,7 @@ class MaskHeaderStyle(enum.StrEnum):
     Note that while `lsst.afw` masks have the maximum number of mask planes
     set by the mask pixel type (e.g. an ``int32`` mask has room for 32 planes),
     and hence the index corresponds directly to the bit that is set in the
-    image, SHOEFITS masks have an extra dimension whose shape multiplies the
+    image, ShoeFits masks have an extra dimension whose shape multiplies the
     number of planes, and hence converting this the plane index to the bit in
     a particular element of that extra dimension is more complicated (and is
     best left to `MaskSchema.bitmask`, when possible).

@@ -9,6 +9,10 @@
 # Use of this source code is governed by a 3-clause BSD-style
 # license that can be found in the LICENSE file.
 
+"""Pydantic models, validators, and serialization for conponents of the ASDF
+schema that are used in this package.
+"""
+
 from __future__ import annotations
 
 __all__ = (
@@ -41,7 +45,11 @@ from ._write_context import WriteContext
 
 
 class UnitSerialization:
-    """Pydantic hooks for unit serialization."""
+    """Pydantic hooks for unit serialization.
+
+    This class provides implementations for the `Unit` type alias for
+    `astropy.unit.Unit` that adds Pydantic serialization and validation.
+    """
 
     @classmethod
     def __get_pydantic_core_schema__(
@@ -119,6 +127,9 @@ class InlineArrayModel(pydantic.BaseModel):
 
 
 def array_model_discriminator(obj: Any) -> str:
+    """Discriminator function used to distinguish between `ArrayReferenceModel`
+    and `InlineArrayModel` (in both Python and serialized forms).
+    """
     if isinstance(obj, dict):
         return "reference" if "source" in obj else "inline"
     return "reference" if hasattr(obj, "source") else "inline"
@@ -137,7 +148,11 @@ ArrayModelAdapter = pydantic.TypeAdapter(ArrayModel)
 
 
 class ArraySerialization:
-    """Pydantic hooks for array serialization."""
+    """Pydantic hooks for array serialization.
+
+    This class provides implementations for the `Array` type alias for
+    `numpy.ndarray` that adds Pydantic serialization and validation.
+    """
 
     @classmethod
     def __get_pydantic_core_schema__(
@@ -277,7 +292,11 @@ class TimeModel(pydantic.BaseModel):
 
 
 class TimeSerialization:
-    """Pydantic hooks for time serialization."""
+    """Pydantic hooks for time serialization.
+
+    This class provides implementations for the `Time` type alias for
+    `astropy.time.Time` that adds Pydantic serialization and validation.
+    """
 
     @classmethod
     def __get_pydantic_core_schema__(
