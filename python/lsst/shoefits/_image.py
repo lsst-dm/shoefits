@@ -13,6 +13,7 @@ from __future__ import annotations
 
 __all__ = ("Image", "ImageReference")
 
+from collections.abc import Sequence
 from typing import Any, final
 
 import astropy.io.fits
@@ -63,8 +64,8 @@ class Image:
         /,
         *,
         bbox: Box | None = None,
-        start: tuple[int, ...] | None = None,
-        shape: tuple[int, ...] | None = None,
+        start: Sequence[int] | None = None,
+        shape: Sequence[int] | None = None,
         unit: astropy.units.Unit | None = None,
         dtype: npt.DTypeLike | None = None,
     ):
@@ -152,11 +153,11 @@ class Image:
         header: astropy.io.fits.Header | None = None
         if options := write_context.get_fits_write_options():
             header = astropy.io.fits.Header()
-            options.add_array_start_wcs(header, self.bbox.start)
+            options.add_array_start_wcs(header, [i.start for i in self.bbox])
             if self.unit is not None:
                 header["BUNIT"] = self.unit.to_string(format="fits")
         data = write_context.add_array(self.array, header)
-        return ImageReference.pack(data, self.bbox.start, self.unit)
+        return ImageReference.pack(data, [i.start for i in self.bbox], self.unit)
 
     @classmethod
     def __get_pydantic_json_schema__(
@@ -169,11 +170,11 @@ class ImageReference(pydantic.BaseModel):
     """Pydantic model used to represent the serialized form of an `Image`."""
 
     data: asdf_utils.QuantityModel | asdf_utils.ArrayModel
-    start: tuple[int, ...]
+    start: list[int]
 
     @classmethod
     def pack(
-        cls, array_model: asdf_utils.ArrayModel, start: tuple[int, ...], unit: asdf_utils.Unit | None
+        cls, array_model: asdf_utils.ArrayModel, start: Sequence[int], unit: asdf_utils.Unit | None
     ) -> ImageReference:
         """Construct an `ImageReference` from the components of a serialized
         image.
@@ -188,9 +189,9 @@ class ImageReference(pydantic.BaseModel):
             Units for the image's pixel values.
         """
         if unit is None:
-            return cls.model_construct(data=array_model, start=start)
+            return cls.model_construct(data=array_model, start=list(start))
         return cls.model_construct(
-            data=asdf_utils.QuantityModel.model_construct(value=array_model, unit=unit), start=start
+            data=asdf_utils.QuantityModel.model_construct(value=array_model, unit=unit), start=list(start)
         )
 
     def unpack(self) -> tuple[asdf_utils.ArrayModel, asdf_utils.Unit | None]:

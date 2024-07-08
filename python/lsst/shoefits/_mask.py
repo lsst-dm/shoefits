@@ -15,7 +15,7 @@ __all__ = ("Mask", "MaskPlane", "MaskSchema", "MaskReference")
 
 import dataclasses
 import math
-from collections.abc import Callable, Iterable, Iterator, Mapping
+from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from typing import Any
 
 import astropy.io.fits
@@ -203,9 +203,13 @@ class Mask:
         *,
         schema: MaskSchema,
         bbox: Box | None = None,
-        start: tuple[int, ...] | None = None,
-        shape: tuple[int, ...] | None = None,
+        start: Sequence[int] | None = None,
+        shape: Sequence[int] | None = None,
     ):
+        if shape is not None:
+            shape = tuple(shape)
+        if start is not None:
+            start = tuple(start)
         if isinstance(array_or_fill, np.ndarray):
             array = np.array(array_or_fill, dtype=schema.dtype)
             if array.ndim != 3:
@@ -291,7 +295,7 @@ class Mask:
                 raise ReadError(
                     f"Mask array shape ends with {shape[2]}, not {schema.mask_size} as expected from schema."
                 )
-            return Box.from_shape(shape, start=reference.start + (0,))
+            return Box.from_shape(shape, start=reference.start + [0])
 
         slice_result: Callable[[Box], tuple[slice, ...]] | None = None
         if read_context := ReadContext.from_info(info):
@@ -315,10 +319,10 @@ class Mask:
         header: astropy.io.fits.Header | None = None
         if options := write_context.get_fits_write_options():
             header = astropy.io.fits.Header()
-            options.add_array_start_wcs(header, self.bbox.start + (0,))
+            options.add_array_start_wcs(header, [i.start for i in self.bbox] + [0])
             options.add_mask_schema_header(header, self.schema)
         data = write_context.add_array(self.array, header)
-        return MaskReference(data=data, start=self.bbox.start, planes=list(self.schema))
+        return MaskReference(data=data, start=[i.start for i in self.bbox], planes=list(self.schema))
 
     @classmethod
     def __get_pydantic_json_schema__(
@@ -334,5 +338,5 @@ class MaskReference(pydantic.BaseModel):
     """Pydantic model used to represent the serialized form of a `Mask`."""
 
     data: asdf_utils.ArrayModel
-    start: tuple[int, ...]
+    start: list[int]
     planes: list[MaskPlane | None]

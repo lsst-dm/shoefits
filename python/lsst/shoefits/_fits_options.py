@@ -22,7 +22,7 @@ __all__ = (
 
 import dataclasses
 import enum
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from typing import TYPE_CHECKING, Any, TypeVar
 
 import astropy.io.fits
@@ -182,7 +182,7 @@ class FitsOptions:
             return handler(obj)
 
     def add_array_start_wcs(
-        self, header: astropy.io.fits.Header, start: tuple[int, ...], wcs_name: str = "A"
+        self, header: astropy.io.fits.Header, start: Sequence[int], wcs_name: str = "A"
     ) -> None:
         """Modify a FITS header to include a WCS that applies an integer
         offset.

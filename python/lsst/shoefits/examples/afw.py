@@ -382,12 +382,7 @@ class StampList(pydantic.BaseModel):
         box_x = rng.randint(bbox.x.start, bbox.x.stop, size=(5, 2))
         box_y = rng.randint(bbox.y.start, bbox.y.stop, size=(5, 2))
         for n in range(5):
-            bbox = shf.Box(
-                root=(
-                    shf.Interval.hull(*box_y[n, :]),
-                    shf.Interval.hull(*box_x[n, :]),
-                )
-            )
+            bbox = shf.Box(shf.Interval.hull(*box_y[n, :]), shf.Interval.hull(*box_x[n, :]))
             result.stamps.append(
                 Stamp.from_section(
                     full_exposure,
