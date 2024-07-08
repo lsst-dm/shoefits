@@ -31,13 +31,16 @@ class Thing(ABC):
         raise NotImplementedError()
 
 
-@shf.register_tag("A")
 class ThingA(Thing):
     def __init__(self, i: int):
         self.i = i
 
     def value(self) -> int:
         return self.i
+
+    @property
+    def tag(self) -> str:
+        return "A"
 
 
 class SerializedA(pydantic.BaseModel):
@@ -56,12 +59,15 @@ class AdapterA(shf.PolymorphicAdapter[ThingA, SerializedA]):
         return ThingA(i=serialized.data)
 
 
-@shf.register_tag("B")
 class ThingB(pydantic.BaseModel, Thing):
     data: int = 0
 
     def value(self) -> int:
         return self.data
+
+    @property
+    def tag(self) -> str:
+        return "B"
 
 
 adapter_registry = shf.PolymorphicAdapterRegistry()
@@ -72,7 +78,7 @@ adapter_registry.register_native("B", ThingB)
 class Example(pydantic.BaseModel):
     array: shf.Array
     unit: shf.Unit
-    thing: Annotated[Thing, shf.Polymorphic()] | None = None
+    thing: Annotated[Thing, shf.Polymorphic(lambda t: t.tag)] | None = None
 
 
 def test_round_trip_json_inline() -> None:

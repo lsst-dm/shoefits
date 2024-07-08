@@ -31,7 +31,6 @@ from ._polymorphic import (
     PolymorphicAdapterRegistry,
     PolymorphicReadError,
     PolymorphicWriteError,
-    register_tag,
 )
 from ._read_context import ReadContext, ReadError
 from ._write_context import WriteContext, WriteError

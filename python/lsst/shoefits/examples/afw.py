@@ -14,7 +14,7 @@ from __future__ import annotations
 __all__ = ()
 
 from abc import ABC, abstractmethod
-from typing import Annotated, Any, Protocol, Self, overload
+from typing import Annotated, Any, ClassVar, Protocol, Self, overload
 
 import astropy.io.fits
 import astropy.time
@@ -96,10 +96,11 @@ class BoundedField(pydantic.BaseModel, ABC):
         raise NotImplementedError()
 
 
-@shf.register_tag("chebyshev_bounded_field")
 class ChebyshevBoundedField(BoundedField):
     to_chebyshev_domain: AffineTransform  # maps bbox to [-1,1]x[-1,1]
     coefficients: shf.Array  # shape=(order_x + 1, order_y + 1)
+
+    tag: ClassVar[str] = "chebyshev_bounded_field"
 
     @overload
     def evaluate(self, x: float, y: float) -> float: ...
@@ -129,7 +130,7 @@ class ChebyshevBoundedField(BoundedField):
 class PhotoCalib(pydantic.BaseModel):
     mean: float
     is_constant: bool
-    calibration: Annotated[BoundedField, shf.Polymorphic()]
+    calibration: Annotated[BoundedField, shf.Polymorphic(lambda x: x.tag)]
 
     @classmethod
     def make_example(cls, bbox: shf.Box, rng: np.random.RandomState) -> PhotoCalib:

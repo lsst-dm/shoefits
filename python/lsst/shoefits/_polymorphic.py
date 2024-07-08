@@ -18,13 +18,10 @@ __all__ = (
     "PolymorphicReadError",
     "PolymorphicWriteError",
     "Polymorphic",
-    "register_tag",
-    "get_tag_from_registry",
 )
 
 import warnings
 from abc import abstractmethod
-from collections.abc import Callable
 from typing import (
     Any,
     Generic,
@@ -34,7 +31,6 @@ from typing import (
     Union,
     get_args,
     get_origin,
-    overload,
 )
 
 import astropy.io.fits
@@ -49,8 +45,6 @@ _C = TypeVar("_C", bound=type[Any])
 _T = TypeVar("_T")
 _S = TypeVar("_S", bound=pydantic.BaseModel)
 
-_tag_registry: dict[type[Any], str] = {}
-
 
 class GetPolymorphicTag(Protocol):
     """Interface for callables used to get the tag string for a polymorphic
@@ -58,64 +52,6 @@ class GetPolymorphicTag(Protocol):
     """
 
     def __call__(self, instance: Any) -> str: ...
-
-
-def get_tag_from_registry(instance: Any) -> str:
-    """Get the tag string for a polymorphic object from the singleton tag
-    registry.
-
-    Notes
-    -----
-    This function uses strict type equality, not inheritance relationships, so
-    it can only be used in cases where the exact type of the given object has
-    been registered via `register_tag`, not just a base class.
-    """
-    return _tag_registry[type(instance)]
-
-
-@overload
-def register_tag(tag: str) -> Callable[[_C], _C]: ...
-
-
-@overload
-def register_tag(tag: str, target_type: _C) -> _C: ...
-
-
-def register_tag(tag: str, target_type: _C | None = None) -> Any:
-    """Register a type for participation in a `Polymorphic` annotated field.
-
-    Notes
-    -----
-    This function can be used as a decorator::
-
-        @register_tag("example_a")
-        class ExampleA:
-            ...
-
-    or called with the `type` to register as its second argument::
-
-        class ExampleA:
-            ...
-
-        register_tag("example_a", ExampleA)
-
-    Registering the exact type (not just a base class) allows the default
-    `get_tag_from_registry` function to be used to obtain the string tag for
-    an object when serializing a `Polymorphic` annotated field.  This is only
-    one of the two registrations needed by the `Polymorphic` system; see
-    `PolymorphicAdapterRegistry` for the other.
-    """
-    if target_type is None:
-
-        def decorator(target_type: _C) -> _C:
-            _tag_registry[target_type] = tag
-            return target_type
-
-        return decorator
-
-    else:
-        _tag_registry[target_type] = tag
-        return target_type
 
 
 class PolymorphicAdapter(Generic[_T, _S]):
@@ -206,10 +142,7 @@ class PolymorphicAdapterRegistry:
     Notes
     -----
     This registry provides a way for the [de]serialization machinery to go from
-    a string tag to `PolymorphicAdapter` instance.  When saving objects, it
-    also needs a way to obtain that string tag from the object being saved,
-    which (but need not) involve another registry; see `register_tag` and
-    `Polymorphic` for details.
+    a string tag to `PolymorphicAdapter` instance.
     """
 
     def __init__(self) -> None:
@@ -246,10 +179,9 @@ class Polymorphic:
 
     Parameters
     ----------
-    get_tag, optional
+    get_tag
         Callable used to obtain the string tag that identifies a concrete type
-        from an instance.  The default is `get_tag_from_registry`, which
-        requires all participating types to be registered with `register_tag`.
+        from an instance.
     on_load_failure, optional
         How to handle read attempts in which the string tag that was serialized
         is not present in the `PolymorphicAdapterRegistry`.  Note that other
@@ -276,8 +208,6 @@ class Polymorphic:
             def __init__(self, x: str) -> None:
                 self.x = x
 
-        shf.register_tag("derived1", Derived1)
-
 
         class Model1(pydantic.BaseModel):
             ```Model used for serialization of `Derived1` instances.```
@@ -298,16 +228,21 @@ class Polymorphic:
                 return Derived1(x=m.x)
 
 
-        @shf.register_tag("derived2") class Derived2(Base, pydantic.BaseModel):
+        class Derived2(Base, pydantic.BaseModel):
             '''A concrete implementation that is itself a Pydantic model.'''
 
             y: int
+
+            tag: ClassVar[str] = "derived2"
 
 
         class Holder(pydantic.BaseModel):
             '''A model with a polymorphic field.'''
 
-            p: Annotated[Base, Polymorphic()]
+            p: Annotated[
+                Base,
+                Polymorphic(lambda x: getattr(x, "tag", "derived1")),
+            ]
 
 
     Like any other use of `typing.Annotated`, to static type checkers, the type
@@ -321,25 +256,31 @@ class Polymorphic:
     In addition, adapters must be associated with each tag via a
     `PolymorphicAdapterRegistry`.  How a registry is populated in practice and
     passed to serialization and serialization code (subclasses of
-    `WriteContext` and `ReadContext`) is left to downstream applications.
+    `WriteContext` and `ReadContext`) is left to downstream applications.  For
+    this example, this amounts to something like::
+
+        adapter_registry = shf.PolymorphicAdapterRegistry()
+        adapter_registry.register_adapted("derived1", Adapter1())
+        adapter_registry.register_native("derived2", Derived2)
+
 
     When an adapter cannot be found for a serialized tag, the default behavior
     is to raise `PolymorphicReadError`.  Polymorphic fields can also be told to
     ignore these failures or warn about them, but only if they are annotated as
     possibly being `None`::
 
-        p: Annotated[Base | None, Polymorphic(on_load_failure="warn")]
+        p: Annotated[Base | None, Polymorphic(..., on_load_failure="warn")]
 
     If a field may be `None` but load failures should be treated as errors, the
     nullable annotation should appear outside `typing.Annotated`::
 
-        p: Annotated[Base, Polymorphic(on_load_failure="raise")] | None
+        p: Annotated[Base, Polymorphic(..., on_load_failure="raise")] | None
 
     """
 
     def __init__(
         self,
-        get_tag: GetPolymorphicTag = get_tag_from_registry,
+        get_tag: GetPolymorphicTag,
         on_load_failure: Literal["raise", "warn", "ignore"] = "raise",
     ):
         self.get_tag = get_tag
