@@ -167,6 +167,10 @@ class Interval:
             return Interval(start=new_start, stop=new_stop)
         return None
 
+    def dilated_by(self, padding: int) -> Interval:
+        """Return a new interval padded by the given amount on both sides."""
+        return Interval(start=self._start - padding, stop=self._stop + padding)
+
     def slice_within(self, other: Interval) -> slice:
         """Return the `slice` that corresponds to the values in this interval
         when the items of the container being sliced correspond to ``other``.
@@ -320,6 +324,10 @@ class Box(Sequence[Interval]):
                 return None
             intervals.append(r)
         return Box(*intervals)
+
+    def dilated_by(self, padding: int) -> Box:
+        """Return a new box padded by the given amount on all sides."""
+        return Box(*[i.dilated_by(padding) for i in self])
 
     def slice_within(self, other: Box) -> tuple[slice, ...]:
         """Return a tuple of `slice` objects that corresponds to the values of
