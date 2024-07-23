@@ -147,33 +147,22 @@ class FitsWriteContext(WriteContext):
     def fits_write_options(self, options: FitsOptions) -> Iterator[None]:
         # Docstring inherited.
         self._fits_options_stack.append(options)
-        if options.subheader:
-            if self._header_stack:
-                next_header = self._header_stack[-1].copy()
-            else:
-                next_header = astropy.io.fits.Header()
-            self._header_stack.append(next_header)
-            n_extensions = len(self._extensions)
-            self._extlevel += 1
         yield
-        if options.subheader:
-            self._extlevel -= 1
-            if len(self._extensions) == n_extensions and self._header_stack[-1]:
-                warnings.warn("Frame included FITS header exports but no extension data.")
-            del self._header_stack[-1]
         del self._fits_options_stack[-1]
 
-    def export_header_key(
-        self,
-        key: str,
-        value: int | str | float | bool,
-        comment: str | None = None,
-        hierarch: bool = False,
-    ) -> None:
-        # Docstring inherited.
-        self._current_header.set(f"HIERARCH {key}" if hierarch else key, value, comment)
+    @contextmanager
+    def nested(self) -> Iterator[None]:
+        if self._header_stack:
+            next_header = self._header_stack[-1].copy()
+        else:
+            next_header = astropy.io.fits.Header()
+        self._header_stack.append(next_header)
+        self._extlevel += 1
+        yield
+        self._extlevel -= 1
+        del self._header_stack[-1]
 
-    def export_header_update(self, header: astropy.io.fits.Header, for_read: bool = False) -> None:
+    def export_fits_header(self, header: astropy.io.fits.Header, for_read: bool = False) -> None:
         # Docstring inherited.
         if for_read and self._header_stack:
             if header:

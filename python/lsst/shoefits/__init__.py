@@ -17,13 +17,13 @@ from ._fits_options import (
     FitsCompressionAlgorithm,
     FitsOptions,
     MaskHeaderStyle,
-    fits_header_exporter,
 )
 from ._fits_read_context import FitsReadContext
 from ._fits_write_context import FORMAT_VERSION, FitsWriteContext
 from ._geom import Box, Interval
 from ._image import Image, ImageReference
 from ._mask import Mask, MaskPlane, MaskReference, MaskSchema
+from ._model import Model
 from ._polymorphic import (
     GetPolymorphicTag,
     Polymorphic,

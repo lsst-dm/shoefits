@@ -98,8 +98,7 @@ class FitsReadContext(ReadContext):
             n += 1
         self._header.update(hdu.header)
         self._header.strip()
-
-        self._subheader_depth = 0
+        self._nesting_depth = 0
 
     def read(self, model_type: type[pydantic.BaseModel], component: str | None = None) -> Any:
         """Deserialize the stream.
@@ -138,18 +137,18 @@ class FitsReadContext(ReadContext):
     @property
     def primary_header(self) -> astropy.io.fits.Header | None:
         # Docstring inherited.
-        if self._subheader_depth == 0:
+        if self._nesting_depth == 0:
             return self._header
         return None
 
     @contextmanager
-    def subheader(self) -> Iterator[None]:
+    def nested(self) -> Iterator[None]:
         # Docstring inherited.
-        self._subheader_depth += 1
+        self._nesting_depth += 1
         try:
             yield
         finally:
-            self._subheader_depth -= 1
+            self._nesting_depth -= 1
 
     @contextmanager
     def no_parameter_bbox(self) -> Iterator[None]:

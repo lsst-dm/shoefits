@@ -54,16 +54,11 @@ class TestingWriteContext(WriteContext):
     def fits_write_options(self, options: FitsOptions) -> Iterator[None]:
         yield
 
-    def export_header_key(
-        self,
-        key: str,
-        value: int | str | float | bool,
-        comment: str | None = None,
-        hierarch: bool = False,
-    ) -> None:
-        pass
+    @contextmanager
+    def nested(self) -> Iterator[None]:
+        yield
 
-    def export_header_update(self, header: astropy.io.fits.Header, for_read: bool = False) -> None:
+    def export_fits_header(self, header: astropy.io.fits.Header, for_read: bool = False) -> None:
         pass
 
     def add_array(
@@ -94,7 +89,7 @@ class TestingReadContext(ReadContext):
         self.arrays = arrays
 
     @contextmanager
-    def subheader(self) -> Iterator[None]:
+    def nested(self) -> Iterator[None]:
         yield
 
     @contextmanager

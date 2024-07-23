@@ -108,20 +108,18 @@ class ReadContext(ABC):
 
         This is always `None` for non-FITS serialization formats (unless they
         intentionally mimic FITS header storage) and may be `None` or empty for
-        object being read within `subheader` contexts (where any header keys
+        object being read within `nested` contexts (where any header keys
         written by these objects are not sent to the primary HDU).
         """
         return None
 
     @abstractmethod
-    def subheader(self) -> AbstractContextManager[None]:
-        """Return a context manager that represents a level of nesting of FITS
-        HDUs.
+    def nested(self) -> AbstractContextManager[None]:
+        """Return a context manager for a level of logical nesting in the
+        serializated form.
 
-        For consistency, any object that uses this context manager in its
-        Pydantic validation method should use `WriteContext.fits_write_options`
-        with `FitsWriteOptions.subheader` set to `True` in its serialization
-        context.
+        Any type that uses this context manager in validation/read must use
+        `WriteContext.nested` in the same way during serialization.
         """
         raise NotImplementedError()
 

@@ -17,13 +17,12 @@ __all__ = (
     "MaskHeaderStyle",
     "FitsOptions",
     "ExportFitsHeaderKey",
-    "fits_header_exporter",
 )
 
 import dataclasses
 import enum
-from collections.abc import Callable, Sequence
-from typing import TYPE_CHECKING, Any, TypeVar
+from collections.abc import Sequence
+from typing import TYPE_CHECKING, Any
 
 import astropy.io.fits
 import pydantic
@@ -117,57 +116,22 @@ class FitsOptions:
     compression: FitsCompression | None = None
     """How to compress FITS array data."""
 
-    subheader: bool = False
-    """If `True`, consider all FITS header exports nested under this annotation
-    to apply only to FITS extensions generated from fields that are also nested
-    under this annotation.
-
-    For example, when writing these models to FITS::
-
-        class Outer(pydantic.BaseModel):
-            nested: Annotated[Inner, FitsOptions(subheader=True)]
-            outer_image: Image
-            outer_value: Annotated[str, ExportFitsHeaderKey("V1")] = "huzzah!"
-
-        class Inner(pydantic.BaseModel):
-            inner_image: Image inner_value: Annotated[int,
-            ExportFitsHeaderKey("VAL2")] = 4
-
-    the extension for `Outer.outer_image` will have ``V1="huzzah!"`` in its
-    header, while the extension for `Inner.inner_image`` will have both
-    ``V1="huzzah!"`` and ``V2=4``.
-
-    The outermost header level is implemented by setting primary HDU's header
-    keys and using ``INHERIT=T`` in all extensions, so if the above example
-    was being saved directly, both image extensions would actually have
-    ``INHERIT=T`` instead of ``V1="huzzah!"``, with ``V1="huzzah!"`` written
-    directly to the primary header instead.
-    """
-
     def __get_pydantic_core_schema__(
         self, source_type: Any, handler: pydantic.GetCoreSchemaHandler
     ) -> pcs.CoreSchema:
         # This is the Pydantic hook that makes it pay attention to a value in
         # typing.Annotated.
         #
-        # In this case we add "wrap" validator and serializer functions
-        # delegate to the default validation and serialization logic for the
+        # In this case we a serializer function that
+        # delegates to the d serialization logic for the
         # annotated type within a context manager provided by the `ReadContext`
         # or `WriteContext` method.
-        base_schema = pcs.with_info_wrap_validator_function(self._validate, handler(source_type))
+        base_schema = handler(source_type)
         return pcs.json_or_python_schema(
             json_schema=base_schema,
             python_schema=base_schema,
             serialization=pcs.wrap_serializer_function_ser_schema(self._serialize, info_arg=True),
         )
-
-    def _validate(
-        self, data: Any, handler: pydantic.ValidatorFunctionWrapHandler, info: pydantic.ValidationInfo
-    ) -> Any:
-        if self.subheader and (read_context := ReadContext.from_info(info)):
-            with read_context.subheader():
-                return handler(data)
-        return handler(data)
 
     def _serialize(
         self,
@@ -234,9 +198,6 @@ class ExportFitsHeaderKey:
             image: Image
             value: Annotated[int, ExportFitsHeaderKey("VAL")]
 
-    See `FitsOptions.subheader` for details on how header values are associated
-    with FITS extensions.
-
     This annotation should only be used with fields whose types are natively
     compatible with FITS headers (ASCII `str`, `int`, `float`, `bool`).
     """
@@ -274,6 +235,14 @@ class ExportFitsHeaderKey:
             serialization=pcs.wrap_serializer_function_ser_schema(self._serialize, info_arg=True),
         )
 
+    def _validate(
+        self, value: Any, handler: pydantic.ValidatorFunctionWrapHandler, info: pydantic.ValidationInfo
+    ) -> Any:
+        if read_context := ReadContext.from_info(info):
+            if header := read_context.primary_header:
+                if self.key in header:
+                    del header[self.key]
+
     # TODO: we should have a _validate override too, to strip header keywords
     # from the primary HDU so we can read what's left back in.
 
@@ -284,35 +253,7 @@ class ExportFitsHeaderKey:
         info: pydantic.SerializationInfo,
     ) -> Any:
         if write_context := WriteContext.from_info(info):
-            write_context.export_header_key(self.key, obj, comment=self.comment, hierarch=self.hierarch)
+            header = astropy.io.fits.Header()
+            header.set(f"HIERARCH {self.key}" if self.hierarch else self.key, obj, self.comment)
+            write_context.export_fits_header(header, for_read=False)
         return handler(obj)
-
-
-_T = TypeVar("_T")
-
-
-def fits_header_exporter(func: Callable[[_T], astropy.io.fits.Header]) -> Any:
-    """Decorate a model method as exporting a FITS header.
-
-    Notes
-    -----
-    The decorated method should be a regular instance method that takes only
-    ``self`` and returns an ``astropy.io.fits.Header` instance.
-
-    This may only be used in `pydantic.BaseModel` base classes.
-
-    See `FitsOptions.subheader` for details on how header values are associated
-    with FITS extensions.
-    """
-    # TODO: figure out what to do about header-stripping when this is used
-    # in a context that puts the header values in the primary HDU.
-
-    @pydantic.model_serializer(mode="wrap")
-    def _fits_header_export_serializer(
-        self: _T, handler: pydantic.SerializerFunctionWrapHandler, info: pydantic.SerializationInfo
-    ) -> Any:
-        if write_context := WriteContext.from_info(info):
-            write_context.export_header_update(func(self))
-        return handler(self)
-
-    return _fits_header_export_serializer

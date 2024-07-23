@@ -91,6 +91,16 @@ class WriteContext(ABC):
         raise NotImplementedError()
 
     @abstractmethod
+    def nested(self) -> AbstractContextManager[None]:
+        """Return a context manager for a level of logical nesting in the
+        output serialization.
+
+        Any type that uses this context manager in serialization must use
+        `ReadContext.nested` in the same way during validation/read.
+        """
+        raise NotImplementedError()
+
+    @abstractmethod
     def get_fits_write_options(self) -> FitsOptions | None:
         """Return the current `FitsOptions`.
 
@@ -102,45 +112,12 @@ class WriteContext(ABC):
     def fits_write_options(self, options: FitsOptions) -> AbstractContextManager[None]:
         """Return a context manager that applies FITS-specific write options
         to this object any any nested under it.
-
-        When `FitsWriteOptions.subheader` is `True`, this should be paired with
-        a call to `ReadContext.subheader` in the corresponding validation
-        logic.
         """
         raise NotImplementedError()
 
     @abstractmethod
-    def export_header_key(
-        self,
-        key: str,
-        value: int | str | float | bool,
-        comment: str | None = None,
-        hierarch: bool = False,
-    ) -> None:
-        """Export a FITS header entry.
-
-        Parameters
-        ----------
-        key
-            Header key.
-        value
-            Header value
-        comment, optional
-            Description to include the on the same line as the key and value;
-            should be short enough to fit all within 80 characters.
-        hierarch, optional
-            Use the HIERARCH convention.  If this is `False`, ``key`` must be
-            all caps and 8 characters or less.
-
-        Notes
-        -----
-        Implementations that do not write to FITS should do nothing.
-        """
-        raise NotImplementedError()
-
-    @abstractmethod
-    def export_header_update(self, header: astropy.io.fits.Header, for_read: bool = False) -> None:
-        """Export multiple FITS header entries.
+    def export_fits_header(self, header: astropy.io.fits.Header, for_read: bool = False) -> None:
+        """Export FITS header entries.
 
         Parameters
         ----------
@@ -150,9 +127,8 @@ class WriteContext(ABC):
             If `True`, write header entries with the expectation that they need
             to be read back in later (which is otherwise not usually the case;
             generally we prefer to duplicate header information in a JSON or
-            YAML tree).  This is only guaranteed to work if there is no
-            subheader nesting in the context (see `fits_write_options`) when
-            this is called.
+            YAML tree).  This is only guaranteed to work if there is no nesting
+            in the context (see `Model._shoefits_nest`) when this is called.
         """
         raise NotImplementedError()
 

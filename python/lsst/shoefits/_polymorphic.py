@@ -87,6 +87,19 @@ class PolymorphicAdapter(Generic[_T, _S]):
         """Construct a polymorphic object from a Pydantic model instance."""
         raise NotImplementedError()
 
+    @property
+    def nest(self) -> bool:
+        """Whether to consider this type a logical level of nesting in the
+        serialized form.
+
+        For FITS serialization, this controls whether FITS headers exported by
+        this type or fields within it are included only in HDUs generated from
+        this type's fields (``nest=True``, default) vs. included also in parent
+        or sibling HDUs (``nest=False``).  It also increments the EXTLEVEL
+        header value for nested HDUs.
+        """
+        return True
+
     def extract_fits_header(self, polymorphic: _T) -> astropy.io.fits.Header | None:
         """Return a FITS header values that should be exported to any HDUs
         associated with the polymorphic object when it is saved.
@@ -375,7 +388,7 @@ class Polymorphic:
                 f"which is inconsistent with $tag={tag!r} from the get_tag callback."
             )
         if extracted := adapter.extract_fits_header(obj):
-            write_context.export_header_update(extracted)
+            write_context.export_fits_header(extracted)
         return data
 
     @staticmethod

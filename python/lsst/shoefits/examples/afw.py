@@ -240,7 +240,7 @@ class AffineWcs(pydantic.BaseModel):
         return cls(pixel_to_sky=pixel_to_sky, unit=astropy.units.degree)
 
 
-class VisitInfo(pydantic.BaseModel):
+class VisitInfo(shf.Model):
     exposure_time: shf.Quantity
     dark_time: shf.Quantity
     mid_time: shf.Time
@@ -249,11 +249,19 @@ class VisitInfo(pydantic.BaseModel):
     observation_type: str
     science_program: str
 
-    @shf.fits_header_exporter
-    def to_header(self) -> astropy.io.fits.Header:
+    def _shoefits_export_fits_header(self) -> astropy.io.fits.Header:
         header = astropy.io.fits.Header()
         header["EXPTIME"] = self.exposure_time.to_value(astropy.units.s)
         return header
+
+    @classmethod
+    def _shoefits_strip_fits_header(cls, header: astropy.io.fits.Header) -> None:
+        if "EXPTIME" in header:
+            del header["EXPTIME"]
+
+    @classmethod
+    def _shoefits_nest(cls) -> bool:
+        return False
 
     @classmethod
     def make_example(cls, rng: np.random.RandomState) -> Self:
@@ -271,13 +279,13 @@ class VisitInfo(pydantic.BaseModel):
         )
 
 
-class ExposureInfo(pydantic.BaseModel):
+class ExposureInfo(shf.Model):
     wcs: Annotated[WcsInterface, shf.Polymorphic(get_wcs_tag)] | None = None
     visit_info: VisitInfo | None = None
     photo_calib: PhotoCalib | None = None
 
 
-class MaskedImage(pydantic.BaseModel):
+class MaskedImage(shf.Model):
     image: Annotated[shf.Image, shf.FitsOptions(extname="image")] = pydantic.Field(frozen=True)
     mask: Annotated[shf.Mask, shf.FitsOptions(extname="mask", mask_header_style=shf.MaskHeaderStyle.AFW)] = (
         pydantic.Field(frozen=True)
@@ -371,8 +379,8 @@ class Stamp(MaskedImage):
     wcs: Annotated[WcsInterface, shf.Polymorphic(get_wcs_tag)]
 
 
-class StampList(pydantic.BaseModel):
-    stamps: list[Annotated[Stamp, shf.FitsOptions(subheader=True)]] = pydantic.Field(default_factory=list)
+class StampList(shf.Model):
+    stamps: list[Stamp] = pydantic.Field(default_factory=list)
     visit_info: VisitInfo | None = None
     photo_calib: PhotoCalib | None = None
 
