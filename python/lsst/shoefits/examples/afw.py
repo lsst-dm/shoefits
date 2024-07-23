@@ -162,7 +162,7 @@ class FitsWcsModel(pydantic.BaseModel):
     fits: dict[str, float | int | str]
 
 
-class FitsWcsAdapter(shf.PolymorphicAdapter[astropy.wcs.WCS, FitsWcsModel]):
+class FitsWcsAdapter(shf.Adapter[astropy.wcs.WCS, FitsWcsModel]):
     @property
     def model_type(self) -> type[FitsWcsModel]:
         return FitsWcsModel

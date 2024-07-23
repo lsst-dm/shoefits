@@ -47,7 +47,7 @@ class SerializedA(pydantic.BaseModel):
     data: int = 0
 
 
-class AdapterA(shf.PolymorphicAdapter[ThingA, SerializedA]):
+class AdapterA(shf.Adapter[ThingA, SerializedA]):
     @property
     def model_type(self) -> type[SerializedA]:
         return SerializedA
@@ -79,6 +79,7 @@ class Example(pydantic.BaseModel):
     array: shf.Array
     unit: shf.Unit
     thing: Annotated[Thing, shf.Polymorphic(lambda t: t.tag)] | None = None
+    thing_a: Annotated[ThingA, AdapterA()] | None = None
 
 
 def test_round_trip_json_inline() -> None:
@@ -86,7 +87,7 @@ def test_round_trip_json_inline() -> None:
     serialization when no array writer is provided.
     """
     write_context = TestingWriteContext(adapter_registry)
-    e1 = Example(array=np.random.randn(3, 4), unit=u.s, thing=ThingA(i=2))
+    e1 = Example(array=np.random.randn(3, 4), unit=u.s, thing=ThingA(i=2), thing_a=ThingA(i=3))
     s = e1.model_dump_json(context=write_context.inject())
     read_context = TestingReadContext(adapter_registry, write_context.arrays)
     e2 = Example.model_validate_json(s, context=read_context.inject())
@@ -94,6 +95,8 @@ def test_round_trip_json_inline() -> None:
     assert e1.unit == e2.unit
     assert isinstance(e2.thing, ThingA)
     assert e2.thing.value() == 2
+    assert isinstance(e2.thing_a, ThingA)
+    assert e2.thing_a.value() == 3
 
 
 def test_round_trip_python_inline() -> None:
@@ -101,7 +104,7 @@ def test_round_trip_python_inline() -> None:
     serialization when no array writer is provided.
     """
     write_context = TestingWriteContext(adapter_registry)
-    e1 = Example(array=np.random.randn(3, 4), unit=u.s, thing=ThingB(data=3))
+    e1 = Example(array=np.random.randn(3, 4), unit=u.s, thing=ThingB(data=3), thing_a=ThingA(i=4))
     d = e1.model_dump(context=write_context.inject())
     read_context = TestingReadContext(adapter_registry, write_context.arrays)
     e2 = Example.model_validate(d, context=read_context.inject())
@@ -109,6 +112,8 @@ def test_round_trip_python_inline() -> None:
     assert e1.unit == e2.unit
     assert isinstance(e2.thing, ThingB)
     assert e2.thing.value() == 3
+    assert isinstance(e2.thing_a, ThingA)
+    assert e2.thing_a.value() == 4
 
 
 def test_schema_inline() -> None:

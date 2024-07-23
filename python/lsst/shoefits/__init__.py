@@ -10,6 +10,7 @@
 # license that can be found in the LICENSE file.
 
 from . import asdf_utils, json_utils, keywords
+from ._adapter import Adapter
 from ._dtypes import FloatType, IntegerType, NumberType, SignedIntegerType, UnsignedIntegerType, is_unsigned
 from ._fits_options import (
     ExportFitsHeaderKey,
@@ -27,7 +28,6 @@ from ._model import Model
 from ._polymorphic import (
     GetPolymorphicTag,
     Polymorphic,
-    PolymorphicAdapter,
     PolymorphicAdapterRegistry,
     PolymorphicReadError,
     PolymorphicWriteError,

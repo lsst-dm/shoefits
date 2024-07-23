@@ -12,7 +12,6 @@
 from __future__ import annotations
 
 __all__ = (
-    "PolymorphicAdapter",
     "PolymorphicAdapterRegistry",
     "GetPolymorphicTag",
     "PolymorphicReadError",
@@ -21,10 +20,8 @@ __all__ = (
 )
 
 import warnings
-from abc import abstractmethod
 from typing import (
     Any,
-    Generic,
     Literal,
     Protocol,
     TypeVar,
@@ -33,16 +30,14 @@ from typing import (
     get_origin,
 )
 
-import astropy.io.fits
 import pydantic
 import pydantic_core.core_schema as pcs
 
+from ._adapter import Adapter
 from ._read_context import ReadContext, ReadError
 from ._write_context import WriteContext, WriteError
 from .json_utils import JsonValue
 
-_C = TypeVar("_C", bound=type[Any])
-_T = TypeVar("_T")
 _S = TypeVar("_S", bound=pydantic.BaseModel)
 
 
@@ -54,84 +49,9 @@ class GetPolymorphicTag(Protocol):
     def __call__(self, instance: Any) -> str: ...
 
 
-class PolymorphicAdapter(Generic[_T, _S]):
-    """A helper class that transforms arbitrary objects to Pydantic models.
-
-    Adapter instances are associated with string tags in a
-    `PolymorphicAdapterRegistry`, and are used serializing or serializing an
-    object in a `Polymorphic` annotated field.
-
-    Notes
-    -----
-    `Polymorphic` has two generic type parameters:
-
-    - the arbitrary type being adapted
-    - the Pydantic model type it is mapped to for serialization.
-    """
-
-    @property
-    @abstractmethod
-    def model_type(self) -> type[_S]:
-        """The Pydantic model type the polymorphic type is mapped to for
-        serialization.
-        """
-        raise NotImplementedError()
-
-    @abstractmethod
-    def to_model(self, polymorphic: _T, /) -> _S:
-        """Convert a polymorphic object to a Pydantic model instance."""
-        raise NotImplementedError()
-
-    @abstractmethod
-    def from_model(self, model: _S, /) -> _T:
-        """Construct a polymorphic object from a Pydantic model instance."""
-        raise NotImplementedError()
-
-    @property
-    def nest(self) -> bool:
-        """Whether to consider this type a logical level of nesting in the
-        serialized form.
-
-        For FITS serialization, this controls whether FITS headers exported by
-        this type or fields within it are included only in HDUs generated from
-        this type's fields (``nest=True``, default) vs. included also in parent
-        or sibling HDUs (``nest=False``).  It also increments the EXTLEVEL
-        header value for nested HDUs.
-        """
-        return True
-
-    def extract_fits_header(self, polymorphic: _T) -> astropy.io.fits.Header | None:
-        """Return a FITS header values that should be exported to any HDUs
-        associated with the polymorphic object when it is saved.
-
-        Notes
-        -----
-        The default implementation returns `None`, resulting in no FITS header
-        values being exported.  FITS header exports are stripped on read, not
-        read (see `strip_fits_header`).
-
-        See `FitsWriteContext` for details of how FITS HDUs are associated with
-        objects in a nested data structure.
-        """
-        return None
-
-    def strip_fits_header(self, header: astropy.io.fits.Header) -> None:
-        """Strip any FITS header keys that may have been added by this adapter
-        on write.
-
-        Notes
-        -----
-        This method is not guaranteed to be called, as in some cases a FITS
-        header may be completely discarded instead (situations where we
-        actually read from FITS headers are very rare; we prefer to duplicate
-        information in the object tree itself instead).
-        """
-        pass
-
-
-class NativeAdapter(PolymorphicAdapter[_S, _S]):
-    """An implementation of `PolymorphicAdapter` for polymorphic objects that
-    are themselves Pydantic models.
+class NativeAdapter(Adapter[_S, _S]):
+    """An implementation of `Adapter` for polymorphic objects that are
+    themselves Pydantic models.
     """
 
     def __init__(self, native_type: type[_S]):
@@ -149,22 +69,22 @@ class NativeAdapter(PolymorphicAdapter[_S, _S]):
 
 
 class PolymorphicAdapterRegistry:
-    """A registry of `PolymorphicAdapter` objects that is used to save and load
+    """A registry of `Adapter` objects that is used to save and load
     objects in `Polymorphic` annotated fields.
 
     Notes
     -----
     This registry provides a way for the [de]serialization machinery to go from
-    a string tag to `PolymorphicAdapter` instance.
+    a string tag to `Adapter` instance.
     """
 
     def __init__(self) -> None:
-        self._adapters: dict[str, PolymorphicAdapter[Any, pydantic.BaseModel]] = {}
+        self._adapters: dict[str, Adapter[Any, pydantic.BaseModel]] = {}
 
-    def __getitem__(self, tag: str) -> PolymorphicAdapter[Any, pydantic.BaseModel]:
+    def __getitem__(self, tag: str) -> Adapter[Any, pydantic.BaseModel]:
         return self._adapters[tag]
 
-    def register_adapter(self, tag: str, adapter: PolymorphicAdapter[Any, Any]) -> None:
+    def register_adapter(self, tag: str, adapter: Adapter[Any, Any]) -> None:
         """Register the given adapter instance with the given string tag."""
         self._adapters[tag] = adapter
 
@@ -228,7 +148,7 @@ class Polymorphic:
             x: str
 
 
-        class Adapter1(shf.PolymorphicAdapter[Derived1, Model1]):
+        class Adapter1(shf.Adapter[Derived1, Model1]):
             ```Adapter that maps `Derived1` to `Model1` for serialization.```
 
             @property def model_type(self) -> type[Model1]:
@@ -253,8 +173,7 @@ class Polymorphic:
             '''A model with a polymorphic field.'''
 
             p: Annotated[
-                Base,
-                Polymorphic(lambda x: getattr(x, "tag", "derived1")),
+                Base, Polymorphic(lambda x: getattr(x, "tag", "derived1")),
             ]
 
 
@@ -353,7 +272,7 @@ class Polymorphic:
             case _:
                 raise PolymorphicReadError("No string '$tag' entry found for polymorphic field.")
         try:
-            adapter: PolymorphicAdapter[Any, Any] = read_context.polymorphic_adapter_registry[tag]
+            adapter: Adapter[Any, Any] = read_context.polymorphic_adapter_registry[tag]
         except KeyError as err:
             if self.on_load_failure == "raise":
                 raise PolymorphicReadError(str(err))
