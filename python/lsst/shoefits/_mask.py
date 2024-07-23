@@ -247,7 +247,7 @@ class Mask:
         return self._array
 
     @array.setter
-    def array(self, value: np.ndarray) -> None:
+    def array(self, value: np.ndarray | int) -> None:
         self._array[:, :] = value
 
     @property

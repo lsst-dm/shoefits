@@ -105,7 +105,7 @@ class Image:
         return self._array
 
     @array.setter
-    def array(self, value: np.ndarray) -> None:
+    def array(self, value: np.ndarray | int | float) -> None:
         self._array[...] = value
 
     @property
