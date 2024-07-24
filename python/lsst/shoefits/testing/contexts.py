@@ -58,11 +58,13 @@ class TestingWriteContext(WriteContext):
     def nested(self) -> Iterator[None]:
         yield
 
-    def export_fits_header(self, header: astropy.io.fits.Header, for_read: bool = False) -> None:
+    def export_fits_header(
+        self, header: astropy.io.fits.Header, for_read: bool = False, is_wcs: bool = False
+    ) -> None:
         pass
 
     def add_array(
-        self, array: np.ndarray, header: astropy.io.fits.Header | None = None
+        self, array: np.ndarray, header: astropy.io.fits.Header | None = None, use_wcs_default: bool = False
     ) -> asdf_utils.ArrayReferenceModel:
         key: str | int = len(self.arrays)
         if key % 2:

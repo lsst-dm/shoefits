@@ -116,6 +116,17 @@ class FitsOptions:
     compression: FitsCompression | None = None
     """How to compress FITS array data."""
 
+    wcs: bool | None = None
+    """How to associate fields that export a FITS WCS with fields that export
+    arrays.
+
+    If `True`, all arrays that are written to image HDUs will have their
+    headers populated with FITS WCS headers exported by siblings or parents
+    (as defined by `Model._shoefits_nest`).  If `False`, FITS WCS headers are
+    never written.  If `None` (default), FITS WCS headers are included for
+    `Image` and `Mask` objects, but not arbitrary `numpy.ndarray` fields.
+    """
+
     def __get_pydantic_core_schema__(
         self, source_type: Any, handler: pydantic.GetCoreSchemaHandler
     ) -> pcs.CoreSchema:
@@ -164,7 +175,7 @@ class FitsOptions:
             Single-character FITS WCS name suffix.
         """
         for i, s in enumerate(reversed(start)):
-            header.set(f"CTYPE{i + 1}{wcs_name}", "LINEAR", "Type of projection")
+            header.set(f"CTYPE{i + 1}{wcs_name}", "LINEAR")
             header.set(f"CRPIX{i + 1}{wcs_name}", 1.0)
             header.set(f"CRVAL{i + 1}{wcs_name}", s)
             header.set(f"CUNIT{i + 1}{wcs_name}", "PIXEL")

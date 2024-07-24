@@ -321,7 +321,7 @@ class Mask:
             header = astropy.io.fits.Header()
             options.add_array_start_wcs(header, [i.start for i in self.bbox] + [0])
             options.add_mask_schema_header(header, self.schema)
-        data = write_context.add_array(self.array, header)
+        data = write_context.add_array(self.array, header, use_wcs_default=True)
         return MaskReference(data=data, start=[i.start for i in self.bbox], planes=list(self.schema))
 
     @classmethod

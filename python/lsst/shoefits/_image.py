@@ -156,7 +156,7 @@ class Image:
             options.add_array_start_wcs(header, [i.start for i in self.bbox])
             if self.unit is not None:
                 header["BUNIT"] = self.unit.to_string(format="fits")
-        data = write_context.add_array(self.array, header)
+        data = write_context.add_array(self.array, header, use_wcs_default=True)
         return ImageReference.pack(data, [i.start for i in self.bbox], self.unit)
 
     @classmethod

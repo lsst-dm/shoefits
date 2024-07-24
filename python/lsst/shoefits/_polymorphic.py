@@ -282,8 +282,6 @@ class Polymorphic:
         model_type: type[pydantic.BaseModel] = adapter.model_type
         if "$tag" not in model_type.model_fields:
             del tree["$tag"]
-        if header := read_context.primary_header:
-            adapter.strip_fits_header(header)
         serialized = model_type.model_validate(tree, context=info.context)
         return adapter.from_model(serialized)
 
@@ -306,8 +304,6 @@ class Polymorphic:
                 f"Serialized form already has $tag={data['tag']!r}, "
                 f"which is inconsistent with $tag={tag!r} from the get_tag callback."
             )
-        if extracted := adapter.extract_fits_header(obj):
-            write_context.export_fits_header(extracted)
         return data
 
     @staticmethod

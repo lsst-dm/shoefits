@@ -16,7 +16,6 @@ __all__ = ("Adapter",)
 from abc import abstractmethod
 from typing import Any, Generic, TypeVar
 
-import astropy.io.fits
 import pydantic
 import pydantic_core.core_schema as pcs
 
@@ -35,14 +34,6 @@ class Adapter(Generic[_T, _S]):
     - the arbitrary type being adapted;
     - the Pydantic model type it is mapped to for serialization (also exposed
       at runtime via the `model_type` property).
-
-    The model type may be a subclass of `Model` or just `pydantic.BaseModel`.
-    If the former, `Model._shoefits_export_fits_header` and
-    `Model._shoefits_strip_fits_header` are called in addition to
-    `extract_fits_header` and `strip_fits_header` on the adapter (usually
-    implementations will implement only one of these pairs, depending on
-    whether the original type or the model form is easiest to transform into
-    a FITS header).
 
     Instances of subclass implementations of `Adapter` can be used directly
     with `typing.Annotated` to implement proxied serialization and validation
@@ -71,6 +62,10 @@ class Adapter(Generic[_T, _S]):
 
     Adapters are also used by the `Polymorphic` annotation class to support
     cases where the set of possible runtime types is not known in advance.
+
+    The model type should usually not be a subclass of the `Model` intermediate
+    base class, because `Model` and `Adapter` both support frame nesting
+    and header updates, and these interact in usually-undesirable ways.
     """
 
     @property
@@ -91,38 +86,10 @@ class Adapter(Generic[_T, _S]):
         """Construct an adapted object from a Pydantic model instance."""
         raise NotImplementedError()
 
-    def extract_fits_header(self, adapted: _T) -> astropy.io.fits.Header | None:
-        """Return a FITS header values that should be exported to any HDUs
-        associated with the object when it is saved.
-
-        Notes
-        -----
-        The default implementation returns `None`, resulting in no FITS header
-        values being exported.  FITS header exports are stripped on read, not
-        read (see `strip_fits_header`).
-
-        See `Model._shoefits_nest` for details of how FITS HDUs are associated
-        with objects in a nested data structure.
-        """
-        return None
-
-    def strip_fits_header(self, header: astropy.io.fits.Header) -> None:
-        """Strip any FITS header keys that may have been added by this adapter
-        on write.
-
-        Notes
-        -----
-        This method is not guaranteed to be called, as in some cases a FITS
-        header may be completely discarded instead (situations where we
-        actually read from FITS headers are very rare; we prefer to duplicate
-        information in the object tree itself instead).
-        """
-        pass
-
     def __get_pydantic_core_schema__(
         self, source_type: Any, handler: pydantic.GetCoreSchemaHandler
     ) -> pcs.CoreSchema:
-        from_ref_schema = pcs.chain_schema(
+        from_model_schema = pcs.chain_schema(
             [
                 self.model_type.__pydantic_core_schema__,
                 pcs.no_info_plain_validator_function(self.from_model),
@@ -131,7 +98,7 @@ class Adapter(Generic[_T, _S]):
         if not isinstance(source_type, type):
             raise TypeError(f"Adapters can only be used as an annotation on true types, not {source_type!r}.")
         return pcs.json_or_python_schema(
-            json_schema=from_ref_schema,
-            python_schema=pcs.union_schema([pcs.is_instance_schema(source_type), from_ref_schema]),
+            json_schema=from_model_schema,
+            python_schema=pcs.union_schema([pcs.is_instance_schema(source_type), from_model_schema]),
             serialization=pcs.plain_serializer_function_ser_schema(self.to_model, info_arg=False),
         )

@@ -38,10 +38,17 @@ FORMAT_VERSION = (0, 0, 1)
 
 
 @dataclasses.dataclass
+class _FitsFrame:
+    header: astropy.io.fits.Header = dataclasses.field(default_factory=astropy.io.fits.Header)
+    wcs: astropy.io.fits.Header | None = None
+
+
+@dataclasses.dataclass
 class _FitsExtension:
-    frame_header: astropy.io.fits.Header | None
+    frame_stack: tuple[_FitsFrame, ...]
     extension_only_header: astropy.io.fits.Header
     array: np.ndarray
+    wcs: bool
     compression: FitsCompression | None = None
 
 
@@ -74,9 +81,9 @@ class FitsWriteContext(WriteContext):
             keywords.FORMAT_VERSION, ".".join(str(v) for v in FORMAT_VERSION), "SHOEFITS format version."
         )
         self._primary_header["EXTNAME"] = "INDEX"
+        self._frame_stack: list[_FitsFrame] = [_FitsFrame(self._primary_header)]
         self._extensions: list[_FitsExtension] = []
         self._adapter_registry = polymorphic_adapter_registry
-        self._header_stack: list[astropy.io.fits.Header] = []
         self._fits_options_stack: list[FitsOptions] = []
         self._extlevel: int = 1
         self._extname_counter: Counter[str] = Counter()
@@ -104,17 +111,21 @@ class FitsWriteContext(WriteContext):
         asdf_buffer.write(tree_str.encode())
         tree_size = asdf_buffer.tell()
         asdf_array = np.frombuffer(asdf_buffer.getbuffer(), dtype=np.uint8)
-        primary_hdu = astropy.io.fits.PrimaryHDU(asdf_array, header=self._primary_header)
+        primary_hdu = astropy.io.fits.PrimaryHDU(asdf_array, header=self._frame_stack[0].header)
         primary_hdu.header.set(keywords.TREE_SIZE, tree_size, "Size of tree in bytes.")
         hdu_list = astropy.io.fits.HDUList([primary_hdu])
         # There's no method to get the size of the header without stringifying
         # it, so that's what we do (here and later).
         address = primary_hdu.filebytes()
         for index, extension in enumerate(self._extensions):
-            if extension.frame_header is None:
-                full_header = astropy.io.fits.Header()
-            else:
-                full_header = extension.frame_header.copy()
+            full_header = astropy.io.fits.Header()
+            wcs = None
+            for frame in extension.frame_stack:
+                full_header.update(frame.header)
+                if frame.wcs:
+                    wcs = frame.wcs
+            if extension.wcs and wcs:
+                full_header.update(wcs)
             full_header.set("INHERIT", True)
             full_header.update(extension.extension_only_header)
             if extension.compression:
@@ -152,29 +163,35 @@ class FitsWriteContext(WriteContext):
 
     @contextmanager
     def nested(self) -> Iterator[None]:
-        if self._header_stack:
-            next_header = self._header_stack[-1].copy()
-        else:
-            next_header = astropy.io.fits.Header()
-        self._header_stack.append(next_header)
+        self._frame_stack.append(_FitsFrame())
         self._extlevel += 1
         yield
         self._extlevel -= 1
-        del self._header_stack[-1]
+        del self._frame_stack[-1]
 
-    def export_fits_header(self, header: astropy.io.fits.Header, for_read: bool = False) -> None:
+    def export_fits_header(
+        self, header: astropy.io.fits.Header, for_read: bool = False, is_wcs: bool = False
+    ) -> None:
         # Docstring inherited.
-        if for_read and self._header_stack:
+        if for_read and len(self._frame_stack) > 1:
             if header:
                 warnings.warn(
                     "Header field is nested within a frame other than the root of the tree "
                     "being written to disk, and hence cannot be populated on read. Clear the header field "
-                    "writing to avoid this warning (there is no warning on read)."
+                    "before writing to avoid this warning (there is no warning on read)."
                 )
-        self._current_header.update(header)
+        if for_read and is_wcs:
+            raise TypeError("for_read and is_wcs cannot both be True.")
+        if is_wcs:
+            self._frame_stack[-1].wcs = header.copy()
+        else:
+            self._frame_stack[-1].header.update(header)
 
     def add_array(
-        self, array: np.ndarray, header: astropy.io.fits.Header | None = None
+        self,
+        array: np.ndarray,
+        header: astropy.io.fits.Header | None = None,
+        use_wcs_default: bool = False,
     ) -> ArrayReferenceModel:
         # Docstring inherited.
         label = self._get_next_extension_label()
@@ -198,26 +215,21 @@ class FitsWriteContext(WriteContext):
         if header is not None:
             extension_only_header.update(header)
         compression: FitsCompression | None = None
-        if self._fits_options_stack and (compression := self._fits_options_stack[-1].compression):
+        options = self.get_fits_write_options()
+        if options.compression:
             raise NotImplementedError("FITS compression is not yet supported.")
         extension = _FitsExtension(
             array=array,
-            frame_header=self._current_header,
+            frame_stack=tuple(self._frame_stack),
             extension_only_header=extension_only_header,
             compression=compression,
+            wcs=(options.wcs if options.wcs is not None else use_wcs_default),
         )
         self._extensions.append(extension)
         self._primary_header.set(keywords.EXT_ADDRESS.format(ext_index), 0, "Address of extension data.")
         return ArrayReferenceModel(
             source=f"fits:{label}", shape=list(array.shape), datatype=NumberType.from_numpy(array.dtype)
         )
-
-    @property
-    def _current_header(self) -> astropy.io.fits.Header:
-        if self._header_stack:
-            return self._header_stack[-1]
-        else:
-            return self._primary_header
 
     def _get_next_extension_label(self) -> keywords.FitsExtensionLabel | int:
         if self._fits_options_stack:

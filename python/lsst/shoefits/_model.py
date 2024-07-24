@@ -11,7 +11,7 @@
 
 from __future__ import annotations
 
-__all__ = ("Model",)
+__all__ = ("Model", "Frame")
 
 from contextlib import ExitStack
 from typing import TYPE_CHECKING, Any, Self
@@ -23,6 +23,7 @@ from ._write_context import WriteContext
 
 if TYPE_CHECKING:
     import astropy.io.fits
+    import astropy.wcs
 
     from ._fits_options import FitsOptions
 
@@ -43,7 +44,7 @@ class Model(pydantic.BaseModel):
         or sibling HDUs (`nest=False`).  It also increments the EXTLEVEL
         header value for nested HDUs.
         """
-        return True
+        return False
 
     def _shoefits_export_fits_header(self) -> astropy.io.fits.Header | None:
         """Return a FITS header to export with this object.
@@ -51,6 +52,16 @@ class Model(pydantic.BaseModel):
         This will only be called if the output serialization format is actually
         FITS.  Which HDUs will receive this header is controlled by
         `_shoefits_nest`.
+        """
+        return None
+
+    def _shoefits_export_fits_wcs(self) -> astropy.io.fits.Header | None:
+        """Return a FITS wCS to export with any images or masks nested under
+        this model.
+
+        This will only be called if the output serialization format is actually
+        FITS, and only for HDUs marked as accepting a WCS (see
+        `FitsOptions.wcs`).
         """
         return None
 
@@ -91,6 +102,8 @@ class Model(pydantic.BaseModel):
                     stack.enter_context(write_context.fits_write_options(fits_write_options))
                 if header := self._shoefits_export_fits_header():
                     write_context.export_fits_header(header)
+                if header := self._shoefits_export_fits_wcs():
+                    write_context.export_fits_header(header, is_wcs=True)
             return handler(self)
 
     @pydantic.model_validator(mode="wrap")
@@ -106,3 +119,14 @@ class Model(pydantic.BaseModel):
                     cls._shoefits_strip_fits_header(header)
             return handler(value)
         raise AssertionError("context stack should not suppress exceptions")
+
+
+class Frame(Model):
+    """An intermediate base class for ShoeFits models that provides extra
+    control over serialization.
+    """
+
+    @classmethod
+    def _shoefits_nest(cls) -> bool:
+        # Docstring inherited.
+        return True

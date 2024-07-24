@@ -158,8 +158,11 @@ def get_wcs_tag(wcs: WcsInterface) -> str:
     raise LookupError(type(wcs).__name__)
 
 
-class FitsWcsModel(pydantic.BaseModel):
-    fits: dict[str, float | int | str]
+class FitsWcsModel(shf.Model):
+    fits: dict[str, int | float | str]
+
+    def _shoefits_export_fits_wcs(self) -> astropy.io.fits.Header:
+        return astropy.io.fits.Header(self.fits)
 
 
 class FitsWcsAdapter(shf.Adapter[astropy.wcs.WCS, FitsWcsModel]):
@@ -176,17 +179,14 @@ class FitsWcsAdapter(shf.Adapter[astropy.wcs.WCS, FitsWcsModel]):
         header.update(model.fits)
         return astropy.wcs.WCS(header)
 
-    def extract_fits_header(self, polymorphic: astropy.wcs.WCS) -> astropy.io.fits.Header:
-        return polymorphic.to_header()
-
 
 def make_example_fits_wcs(bbox: shf.Box, rng: np.random.RandomState) -> astropy.wcs.WCS:
     return astropy.wcs.WCS(
         {
             "CTYPE1": "RA---TAN",
             "CTYPE2": "DEC--TAN",
-            "CRVAL1": 32.5 + rng.uniform(-1.0, 1.0),
-            "CRVAL2": 11.2 + rng.uniform(-1.0, 1.0),
+            "CRVAL1": float(32.5 + rng.uniform(-1.0, 1.0)),
+            "CRVAL2": float(11.2 + rng.uniform(-1.0, 1.0)),
             "CRPIX1": bbox.x.center,
             "CRPIX2": bbox.y.center,
             "CD1_1": 5e-5,
@@ -285,7 +285,7 @@ class ExposureInfo(shf.Model):
     photo_calib: PhotoCalib | None = None
 
 
-class MaskedImage(shf.Model):
+class MaskedImage(shf.Frame):
     image: Annotated[shf.Image, shf.FitsOptions(extname="image")] = pydantic.Field(frozen=True)
     mask: Annotated[shf.Mask, shf.FitsOptions(extname="mask", mask_header_style=shf.MaskHeaderStyle.AFW)] = (
         pydantic.Field(frozen=True)
@@ -383,11 +383,16 @@ class StampList(shf.Model):
     stamps: list[Stamp] = pydantic.Field(default_factory=list)
     visit_info: VisitInfo | None = None
     photo_calib: PhotoCalib | None = None
+    parent_wcs: Annotated[astropy.wcs.WCS, FitsWcsAdapter()]
 
     @classmethod
     def make_example(cls, bbox: shf.Box, rng: np.random.RandomState, **kwargs: Any) -> Self:
         full_exposure = Exposure.make_example(bbox, rng, **kwargs)
-        result = cls(visit_info=full_exposure.visit_info, photo_calib=full_exposure.photo_calib)
+        result = cls(
+            visit_info=full_exposure.visit_info,
+            photo_calib=full_exposure.photo_calib,
+            parent_wcs=make_example_fits_wcs(bbox, rng),
+        )
         box_x = rng.randint(bbox.x.start, bbox.x.stop, size=(5, 2))
         box_y = rng.randint(bbox.y.start, bbox.y.stop, size=(5, 2))
         for n in range(5):

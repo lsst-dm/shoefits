@@ -116,7 +116,9 @@ class WriteContext(ABC):
         raise NotImplementedError()
 
     @abstractmethod
-    def export_fits_header(self, header: astropy.io.fits.Header, for_read: bool = False) -> None:
+    def export_fits_header(
+        self, header: astropy.io.fits.Header, for_read: bool = False, is_wcs: bool = False
+    ) -> None:
         """Export FITS header entries.
 
         Parameters
@@ -129,11 +131,17 @@ class WriteContext(ABC):
             generally we prefer to duplicate header information in a JSON or
             YAML tree).  This is only guaranteed to work if there is no nesting
             in the context (see `Model._shoefits_nest`) when this is called.
+        is_wcs, optional
+            If `True`, this is a FITS WCS and should only be written to HDUs
+            that are marked (see `FitsOptions.wcs` and `add_array`) as WCS
+            receivers.
         """
         raise NotImplementedError()
 
     @abstractmethod
-    def add_array(self, array: np.ndarray, header: astropy.io.fits.Header | None = None) -> ArrayModel:
+    def add_array(
+        self, array: np.ndarray, header: astropy.io.fits.Header | None = None, use_wcs_default: bool = False
+    ) -> ArrayModel:
         """Write an array.
 
         Parameters
@@ -143,6 +151,10 @@ class WriteContext(ABC):
         header, optional
             Header entries to save along with this array.  Ignored by non-FITS
             implementations.
+        use_wcs_default, optional
+            Whether to include a FITS WCS in the header for this HDU, if
+            writing to FITS, and a WCS is available from a sibling or parent
+            object (see `export_fits_header`) and `FitsOptions.wcs` is `None`.
 
         Returns
         -------
