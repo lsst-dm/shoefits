@@ -13,7 +13,7 @@ from __future__ import annotations
 
 __all__ = ("TestingWriteContext", "TestingReadContext")
 
-from collections.abc import Callable, Iterator, Mapping
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from typing import TYPE_CHECKING
 
@@ -47,24 +47,19 @@ class TestingWriteContext(WriteContext):
     def polymorphic_adapter_registry(self) -> PolymorphicAdapterRegistry:
         return self._adapter_registry
 
-    def get_fits_write_options(self) -> FitsOptions | None:
+    def get_fits_options(self) -> FitsOptions | None:
         return None
 
     @contextmanager
-    def fits_write_options(self, options: FitsOptions) -> Iterator[None]:
+    def fits_options(self, options: FitsOptions) -> Iterator[None]:
         yield
-
-    @contextmanager
-    def nested(self) -> Iterator[None]:
-        yield
-
-    def export_fits_header(
-        self, header: astropy.io.fits.Header, for_read: bool = False, is_wcs: bool = False
-    ) -> None:
-        pass
 
     def add_array(
-        self, array: np.ndarray, header: astropy.io.fits.Header | None = None, use_wcs_default: bool = False
+        self,
+        array: np.ndarray,
+        header: astropy.io.fits.Header | None = None,
+        start: Sequence[int] | None = None,
+        add_wcs_default: bool = False,
     ) -> asdf_utils.ArrayReferenceModel:
         key: str | int = len(self.arrays)
         if key % 2:

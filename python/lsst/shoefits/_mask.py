@@ -24,7 +24,8 @@ import numpy.typing as npt
 import pydantic
 import pydantic_core.core_schema as pcs
 
-from . import asdf_utils
+from . import asdf_utils, keywords
+from ._fits_options import MaskHeaderStyle
 from ._geom import Box
 from ._read_context import ReadContext, ReadError
 from ._write_context import WriteContext, WriteError
@@ -160,6 +161,19 @@ class MaskSchema:
             bit = self._bits[plane]
             result[bit.index] |= bit.mask
         return result
+
+    def update_header(self, header: astropy.io.fits.Header, style: MaskHeaderStyle) -> None:
+        """Modify a FITS header to include a description of a `MaskSchema`."""
+        if style == "afw":
+            for mask_plane_index, mask_plane in enumerate(self):
+                if mask_plane is not None:
+                    header.set(
+                        keywords.AFW_MASK_PLANE.format(mask_plane.name.upper()),
+                        mask_plane_index,
+                        mask_plane.description,
+                    )
+        else:
+            raise NotImplementedError(f"Unrecognized mask header style: {style}.")
 
 
 class Mask:
@@ -317,11 +331,16 @@ class Mask:
         if (write_context := WriteContext.from_info(info)) is None:
             raise WriteError("Cannot write mask without WriteContext in Pydantic SerializationInfo.")
         header: astropy.io.fits.Header | None = None
-        if options := write_context.get_fits_write_options():
+        if options := write_context.get_fits_options():
             header = astropy.io.fits.Header()
-            options.add_array_start_wcs(header, [i.start for i in self.bbox] + [0])
-            options.add_mask_schema_header(header, self.schema)
-        data = write_context.add_array(self.array, header, use_wcs_default=True)
+            if options.mask_header_style:
+                self.schema.update_header(header, options.mask_header_style)
+        data = write_context.add_array(
+            self.array,
+            header,
+            start=[i.start for i in self.bbox] + [self.schema.mask_size],
+            add_wcs_default=True,
+        )
         return MaskReference(data=data, start=[i.start for i in self.bbox], planes=list(self.schema))
 
     @classmethod

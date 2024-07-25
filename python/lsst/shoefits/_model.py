@@ -11,53 +11,46 @@
 
 from __future__ import annotations
 
-__all__ = ("Model", "Frame")
+__all__ = ("Struct",)
 
+import dataclasses
 from contextlib import ExitStack
-from typing import TYPE_CHECKING, Any, Self
+from typing import TYPE_CHECKING, Any, ClassVar
 
+import astropy.wcs
 import pydantic
 
-from ._read_context import ReadContext
+from ._fits_options import FitsOptions, FitsOptionsDict
 from ._write_context import WriteContext
 
 if TYPE_CHECKING:
     import astropy.io.fits
-    import astropy.wcs
-
-    from ._fits_options import FitsOptions
 
 
-class Model(pydantic.BaseModel):
+class Struct(pydantic.BaseModel):
     """An intermediate base class for ShoeFits models that provides extra
     control over serialization.
     """
 
-    @classmethod
-    def _shoefits_nest(cls) -> bool:
-        """Return a whether to consider this type a logical level of nesting in
-        the serialized form.
+    struct_fits_options: ClassVar[FitsOptionsDict] = FitsOptionsDict(
+        parent_header="inherit", parent_wcs="inherit"
+    )
 
-        For FITS serialization, this controls whether FITS headers exported by
-        this type or fields within it are included only in HDUs generated from
-        this type's fields (`True`, default) vs. included also in parent
-        or sibling HDUs (`nest=False`).  It also increments the EXTLEVEL
-        header value for nested HDUs.
-        """
-        return False
-
-    def _shoefits_export_fits_header(self) -> astropy.io.fits.Header | None:
+    def struct_export_fits_header(self) -> astropy.io.fits.Header | None:
         """Return a FITS header to export with this object.
 
         This will only be called if the output serialization format is actually
-        FITS.  Which HDUs will receive this header is controlled by
-        `_shoefits_nest`.
+        FITS.
         """
         return None
 
-    def _shoefits_export_fits_wcs(self) -> astropy.io.fits.Header | None:
+    def struct_export_fits_wcs(self) -> astropy.wcs.WCS | tuple[astropy.wcs.WCS, str] | None:
         """Return a FITS wCS to export with any images or masks nested under
         this model.
+
+        May return a single `astropy.wcs.WCS` instance or a pair of
+        ``(astropy.wcs.WCS, str)``, with the latter single-uppercase letter
+        to use as the name of the WCS in the header.
 
         This will only be called if the output serialization format is actually
         FITS, and only for HDUs marked as accepting a WCS (see
@@ -65,17 +58,7 @@ class Model(pydantic.BaseModel):
         """
         return None
 
-    @classmethod
-    def _shoefits_strip_fits_header(cls, header: astropy.io.fits.Header) -> None:
-        """Strip any FITS header keys that may have been exported by this
-        object.
-
-        This will only be called if the output serialization format is actually
-        FITS.
-        """
-        pass
-
-    def _shoefits_set_fits_write_options(self, options: FitsOptions) -> FitsOptions:
+    def struct_set_fits_options(self, options: FitsOptions) -> FitsOptions:
         """Set this FITS write options for all of this model's fields.
 
         Parameters
@@ -87,46 +70,36 @@ class Model(pydantic.BaseModel):
         -------
         options
             The new options to use for this object's fields.
+
+        Notes
+        -----
+        The default implementation applies `struct_fits_options`, and should
+        generally be called via `super` before additional edits are made.
         """
+        if self.struct_fits_options:
+            options = dataclasses.replace(options, **self.struct_fits_options)
         return options
 
     @pydantic.model_serializer(mode="wrap")
-    def _shoefits_serialize(
+    def struct_serialize(
         self, handler: pydantic.SerializerFunctionWrapHandler, info: pydantic.SerializationInfo
     ) -> Any:
         with ExitStack() as stack:
             if write_context := WriteContext.from_info(info):
-                if self._shoefits_nest():
-                    stack.enter_context(write_context.nested())
-                if fits_write_options := write_context.get_fits_write_options():
-                    stack.enter_context(write_context.fits_write_options(fits_write_options))
-                if header := self._shoefits_export_fits_header():
-                    write_context.export_fits_header(header)
-                if header := self._shoefits_export_fits_wcs():
-                    write_context.export_fits_header(header, is_wcs=True)
+                if fits_options := write_context.get_fits_options():
+                    # If this is not a FITS writer, fits_options is None and
+                    # this block is skipped.
+                    fits_options = self.struct_set_fits_options(fits_options)
+                    stack.enter_context(write_context.fits_options(fits_options))
+                    if header := self.struct_export_fits_header():
+                        write_context.export_fits_header(header)
+                    match self.struct_export_fits_wcs():
+                        case [astropy.wcs.WCS() as wcs, key]:
+                            write_context.export_fits_wcs(wcs, key)
+                        case astropy.wcs.WCS() as wcs:
+                            write_context.export_fits_wcs(wcs)
+                        case None:
+                            pass
+                        case _:
+                            raise TypeError("Incorrect return type for 'struct_export_fits_wcs'.")
             return handler(self)
-
-    @pydantic.model_validator(mode="wrap")
-    @classmethod
-    def _shoefits_validate(
-        cls, value: Any, handler: pydantic.ValidatorFunctionWrapHandler, info: pydantic.ValidationInfo
-    ) -> Self:
-        with ExitStack() as stack:
-            if read_context := ReadContext.from_info(info):
-                if cls._shoefits_nest():
-                    stack.enter_context(read_context.nested())
-                if header := read_context.primary_header:
-                    cls._shoefits_strip_fits_header(header)
-            return handler(value)
-        raise AssertionError("context stack should not suppress exceptions")
-
-
-class Frame(Model):
-    """An intermediate base class for ShoeFits models that provides extra
-    control over serialization.
-    """
-
-    @classmethod
-    def _shoefits_nest(cls) -> bool:
-        # Docstring inherited.
-        return True

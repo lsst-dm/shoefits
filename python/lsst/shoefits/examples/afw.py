@@ -19,7 +19,7 @@ from typing import Annotated, Any, ClassVar, Protocol, Self, overload
 import astropy.io.fits
 import astropy.time
 import astropy.units
-import astropy.wcs.wcsapi
+import astropy.wcs
 import numpy as np
 import numpy.typing as npt
 import pydantic
@@ -158,11 +158,13 @@ def get_wcs_tag(wcs: WcsInterface) -> str:
     raise LookupError(type(wcs).__name__)
 
 
-class FitsWcsModel(shf.Model):
+class FitsWcsModel(shf.Struct):
     fits: dict[str, int | float | str]
 
-    def _shoefits_export_fits_wcs(self) -> astropy.io.fits.Header:
-        return astropy.io.fits.Header(self.fits)
+    struct_fits_options = {"parent_wcs": "share"}
+
+    def struct_export_fits_wcs(self) -> astropy.wcs.WCS:
+        return astropy.wcs.WCS(self.fits)
 
 
 class FitsWcsAdapter(shf.Adapter[astropy.wcs.WCS, FitsWcsModel]):
@@ -240,7 +242,7 @@ class AffineWcs(pydantic.BaseModel):
         return cls(pixel_to_sky=pixel_to_sky, unit=astropy.units.degree)
 
 
-class VisitInfo(shf.Model):
+class VisitInfo(shf.Struct):
     exposure_time: shf.Quantity
     dark_time: shf.Quantity
     mid_time: shf.Time
@@ -249,19 +251,12 @@ class VisitInfo(shf.Model):
     observation_type: str
     science_program: str
 
-    def _shoefits_export_fits_header(self) -> astropy.io.fits.Header:
+    struct_fits_options = {"parent_wcs": "share"}
+
+    def struct_export_fits_header(self) -> astropy.io.fits.Header:
         header = astropy.io.fits.Header()
         header["EXPTIME"] = self.exposure_time.to_value(astropy.units.s)
         return header
-
-    @classmethod
-    def _shoefits_strip_fits_header(cls, header: astropy.io.fits.Header) -> None:
-        if "EXPTIME" in header:
-            del header["EXPTIME"]
-
-    @classmethod
-    def _shoefits_nest(cls) -> bool:
-        return False
 
     @classmethod
     def make_example(cls, rng: np.random.RandomState) -> Self:
@@ -279,18 +274,16 @@ class VisitInfo(shf.Model):
         )
 
 
-class ExposureInfo(shf.Model):
+class ExposureInfo(shf.Struct):
     wcs: Annotated[WcsInterface, shf.Polymorphic(get_wcs_tag)] | None = None
     visit_info: VisitInfo | None = None
     photo_calib: PhotoCalib | None = None
 
 
-class MaskedImage(shf.Frame):
-    image: Annotated[shf.Image, shf.FitsOptions(extname="image")] = pydantic.Field(frozen=True)
-    mask: Annotated[shf.Mask, shf.FitsOptions(extname="mask", mask_header_style=shf.MaskHeaderStyle.AFW)] = (
-        pydantic.Field(frozen=True)
-    )
-    variance: Annotated[shf.Image, shf.FitsOptions(extname="variance")] = pydantic.Field(frozen=True)
+class MaskedImage(shf.Struct):
+    image: Annotated[shf.Image, shf.Fits(extname="image")] = pydantic.Field(frozen=True)
+    mask: Annotated[shf.Mask, shf.Fits(extname="mask", mask_header_style="afw")] = pydantic.Field(frozen=True)
+    variance: Annotated[shf.Image, shf.Fits(extname="variance")] = pydantic.Field(frozen=True)
 
     @classmethod
     def from_image(
@@ -379,7 +372,7 @@ class Stamp(MaskedImage):
     wcs: Annotated[WcsInterface, shf.Polymorphic(get_wcs_tag)]
 
 
-class StampList(shf.Model):
+class StampList(shf.Struct):
     stamps: list[Stamp] = pydantic.Field(default_factory=list)
     visit_info: VisitInfo | None = None
     photo_calib: PhotoCalib | None = None

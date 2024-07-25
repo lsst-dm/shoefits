@@ -29,7 +29,7 @@ adapter_registry = shf.PolymorphicAdapterRegistry()
 
 def test_image_fits_write() -> None:
     class S(pydantic.BaseModel):
-        image: Annotated[shf.Image, shf.FitsOptions(extname="image")]
+        image: Annotated[shf.Image, shf.Fits(extname="image")]
         alpha: Annotated[float, shf.ExportFitsHeaderKey("ALPHA")]
         beta: int
 
@@ -85,9 +85,8 @@ def test_image_fits_write() -> None:
     np.testing.assert_array_equal(array, s.image.array)
     # Check that the image HDU has the right data and header.
     assert hdu_list[1].header["EXTNAME"] == "image"
-    assert hdu_list[1].header["EXTLEVEL"] == 1
-    assert hdu_list[1].header["CRVAL1A"] == 2
-    assert hdu_list[1].header["CRVAL2A"] == 1
+    assert hdu_list[1].header["CRVAL1A"] == s.image.bbox.x.start
+    assert hdu_list[1].header["CRVAL2A"] == s.image.bbox.y.start
     np.testing.assert_array_equal(hdu_list[1].data, s.image.array)
 
 
@@ -103,7 +102,7 @@ def test_mask_fits_write() -> None:
     )
 
     class S(pydantic.BaseModel):
-        mask: Annotated[shf.Mask, shf.FitsOptions(extname=None, mask_header_style=shf.MaskHeaderStyle.AFW)]
+        mask: Annotated[shf.Mask, shf.Fits(extname=None, mask_header_style="afw")]
 
     s = S(mask=shf.Mask(bbox=shf.Box.factory[1:5, -2:6], schema=mask_schema))
     s.mask.array[0, 0, :] = mask_schema.bitmask("bad", "interpolated")
@@ -153,11 +152,12 @@ def test_mask_fits_write() -> None:
         dtype=np.dtype(np.uint8).newbyteorder(">"),
     ).reshape(*s.mask.array.shape)
     np.testing.assert_array_equal(array, s.mask.array)
-    # Check that the image HDU has the right data and header.
-    assert hdu_list[1].header["EXTLEVEL"] == 1
-    assert hdu_list[1].header["CRVAL1A"] == 0
-    assert hdu_list[1].header["CRVAL2A"] == -2
-    assert hdu_list[1].header["CRVAL3A"] == 1
+    # Check that the mask HDU has the right data and header.
+    assert hdu_list[1].header["NAXIS1"] == s.mask.schema.mask_size
+    assert hdu_list[1].header["NAXIS2"] == s.mask.bbox.x.size
+    assert hdu_list[1].header["NAXIS3"] == s.mask.bbox.y.size
+    assert hdu_list[1].header["CRVAL2A"] == s.mask.bbox.x.start
+    assert hdu_list[1].header["CRVAL3A"] == s.mask.bbox.y.start
     assert hdu_list[1].header["MP_BAD"] == 0
     assert hdu_list[1].header["MP_INTERPOLATED"] == 2
     np.testing.assert_array_equal(hdu_list[1].data, s.mask.array)

@@ -12,88 +12,54 @@
 from __future__ import annotations
 
 __all__ = (
+    "Fits",
     "FitsCompression",
+    "FitsHeaderPropagation",
     "FitsCompressionAlgorithm",
     "MaskHeaderStyle",
     "FitsOptions",
+    "FitsOptionsDict",
     "ExportFitsHeaderKey",
 )
 
 import dataclasses
-import enum
-from collections.abc import Sequence
-from typing import TYPE_CHECKING, Any
+from contextlib import ExitStack
+from typing import Any, Literal, TypeAlias, TypedDict, Unpack
 
 import astropy.io.fits
 import pydantic
 import pydantic_core.core_schema as pcs
 
-from . import keywords
-from ._read_context import ReadContext
 from ._write_context import WriteContext
 
-if TYPE_CHECKING:
-    from ._mask import MaskSchema
+FitsCompressionAlgorithm: TypeAlias = Literal["GZIP_1", "GZIP_2"]
 
-
-class FitsCompressionAlgorithm(enum.StrEnum):
-    """Enumeration of FITS compression algorithms."""
-
-    # Enum values are overridden to match the FITS tile compression extension.
-    GZIP_1 = "GZIP_1"
-    GZIP_2 = "GZIP_2"
+FitsHeaderPropagation: TypeAlias = Literal["inherit", "share", "reset"]
 
 
 @dataclasses.dataclass
 class FitsCompression:
     tile_shape: tuple[int, int]
-    algorithm: FitsCompressionAlgorithm = FitsCompressionAlgorithm.GZIP_2
+    algorithm: FitsCompressionAlgorithm = "GZIP_2"
 
 
-class MaskHeaderStyle(enum.StrEnum):
-    """Enumeration of ways to represent a `MaskSchema` in a FITS header."""
-
-    AFW = enum.auto()
-    """The style used by the `lsst.afw` package.
-
-    This style writes one HIERARCH key for each mask plane, with the key
-    the uppercased name of the mask plane with a ``MP_`` prefix, and the
-    index of that plane in schema, starting from zero.
-
-    Note that while `lsst.afw` masks have the maximum number of mask planes
-    set by the mask pixel type (e.g. an ``int32`` mask has room for 32 planes),
-    and hence the index corresponds directly to the bit that is set in the
-    image, ShoeFits masks have an extra dimension whose shape multiplies the
-    number of planes, and hence converting this the plane index to the bit in
-    a particular element of that extra dimension is more complicated (and is
-    best left to `MaskSchema.bitmask`, when possible).
-    """
+MaskHeaderStyle: TypeAlias = Literal["afw"]
 
 
-@dataclasses.dataclass
+class FitsOptionsDict(TypedDict, total=False):
+    extname: str | None
+    mask_header_style: MaskHeaderStyle | None
+    compression: FitsCompression | None
+    inherit_primary_header: bool
+    parent_header: FitsHeaderPropagation
+    parent_wcs: FitsHeaderPropagation
+    default_wcs_key: str
+    add_wcs: bool | None
+    offset_wcs_key: str | None
+
+
+@dataclasses.dataclass(frozen=True)
 class FitsOptions:
-    """Options for reading and writing model attributes to FITS.
-
-    Notes
-    -----
-    This class is intended to be used via `typing.Annotated` to provide
-    extra information about how to save an attribute when writing to FITS.
-    For example, to set the EXTNAME header for a FITS extension that represents
-    an `Image` object::
-
-        from typing import Annotated
-
-        class Struct(pydantic.BaseModel):
-            variance: Annotated[Image, FitsOptions(extname="VARIANCE")]
-
-    FITS options may be used to annotate any kind of field, though they may
-    have no effect on some (e.g. there is no EXTNAME for simple scalar-value
-    field).
-    When applied to a model or container field, options will apply to all
-    nested members unless they are overridden by a new `FitsOptions`
-    annotation at a lower level.
-    """
-
     extname: str | None = None
     """The ``EXTNAME`` header key to use for the FITS extension that holds this
     object's data.
@@ -110,22 +76,73 @@ class FitsOptions:
 
     The `MaskSchema` description is always saved to the JSON tree in the
     primary FITS HDU, and that description is considered canonical.  The header
-    description controlled by this option is never read by SHOEFITS.
+    description controlled by this option is never read by ShoeFits.
     """
 
     compression: FitsCompression | None = None
     """How to compress FITS array data."""
 
-    wcs: bool | None = None
-    """How to associate fields that export a FITS WCS with fields that export
-    arrays.
+    inherit_primary_header: bool = True
+    """Whether to add INHERIT='T' to FITS extension headers."""
 
-    If `True`, all arrays that are written to image HDUs will have their
-    headers populated with FITS WCS headers exported by siblings or parents
-    (as defined by `Model._shoefits_nest`).  If `False`, FITS WCS headers are
-    never written.  If `None` (default), FITS WCS headers are included for
-    `Image` and `Mask` objects, but not arbitrary `numpy.ndarray` fields.
+    parent_header: FitsHeaderPropagation = "share"
+    """How to handle FITS header keys exported in the context above this one.
+
+    If "inherit", keys from the context above this one will be added to the
+    headers of FITS extensions created in this context, but keys from this
+    context will not be propagated up.
+
+    If "share", keys from the context above this one and keys exported in this
+    context are combined and appear in all FITS extensions created in either
+    context.
+
+    If "reset", keys from the context above this one are ignored.
+
+    The top-level `pydantic.BaseModel` or `Struct` being serialized always
+    exports to the primary FITS HDU's header, and this is not considered a
+    regular parent (it uses INHERIT='T' instead to share its keys), so this
+    option only comes into play two or more levels of `Struct` and/or
+    `FitsOptions` nesting below that top-level object.
     """
+
+    parent_wcs: FitsHeaderPropagation = "share"
+    """How to handle FITS WCSs exported in the context above this one.
+
+    The options are the same as for `parent_header`, but:
+    - A WCS is never added to the primary HDU header or any binary table HDU.
+    - Because the primary HDU can never have a WCS, INHERIT='T' is irrelevant,
+      and this option comes into play just one level of nesting below the
+      top-level object.
+
+    WCS headers from different contexts can only be merged if there are no
+    clashes between WCS "keys" (A-Z suffix or ' ').
+    """
+
+    default_wcs_key: str = " "
+    """Key for exported FITS WCS objects (A-Z or ' ') that do not specify their
+    own key.
+    """
+
+    add_wcs: bool | None = None
+    """Whether to add a FITS WCS to create image HDUs.
+
+    The default (`None`) is to add a FITS WCS for `Image` and `Mask` objects
+    but not regular arrays.
+    """
+
+    offset_wcs_key: str | None = "A"
+    """Key used to create a FITS WCS representing the `Image.start` and
+    `Mask.start` integer offsets (A-Z or ' ').
+
+    Set to `None` to disable adding this WCS entirely.
+    """
+
+
+class Fits:
+    """Options for reading and writing model attributes to FITS."""
+
+    def __init__(self, **kwargs: Unpack[FitsOptionsDict]):
+        self._kwargs = kwargs
 
     def __get_pydantic_core_schema__(
         self, source_type: Any, handler: pydantic.GetCoreSchemaHandler
@@ -133,10 +150,9 @@ class FitsOptions:
         # This is the Pydantic hook that makes it pay attention to a value in
         # typing.Annotated.
         #
-        # In this case we a serializer function that
-        # delegates to the d serialization logic for the
-        # annotated type within a context manager provided by the `ReadContext`
-        # or `WriteContext` method.
+        # In this case we add a "wrap" serializer function that delegates to
+        # the default serialization logic for the annotated type after setting
+        # the FITS options.
         base_schema = handler(source_type)
         return pcs.json_or_python_schema(
             json_schema=base_schema,
@@ -150,46 +166,12 @@ class FitsOptions:
         handler: pydantic.SerializerFunctionWrapHandler,
         info: pydantic.SerializationInfo,
     ) -> Any:
-        if write_context := WriteContext.from_info(info):
-            with write_context.fits_write_options(self):
-                return handler(obj)
-        else:
+        with ExitStack() as stack:
+            if write_context := WriteContext.from_info(info):
+                if fits_options := write_context.get_fits_options():
+                    fits_options = dataclasses.replace(fits_options, **self._kwargs)
+                    stack.enter_context(write_context.fits_options(fits_options))
             return handler(obj)
-
-    def add_array_start_wcs(
-        self, header: astropy.io.fits.Header, start: Sequence[int], wcs_name: str = "A"
-    ) -> None:
-        """Modify a FITS header to include a WCS that applies an integer
-        offset.
-
-        Parameters
-        ----------
-        header
-            Header to modify in place.
-        start
-            Tuple of offset values.  These are the same order as the
-            corresponding array's dimensions, which is the reverse of the
-            dimensions according to FITS (since FITS uses column-major storage
-            while numpy defaults to row-major storage).
-        wcs_name, optional
-            Single-character FITS WCS name suffix.
-        """
-        for i, s in enumerate(reversed(start)):
-            header.set(f"CTYPE{i + 1}{wcs_name}", "LINEAR")
-            header.set(f"CRPIX{i + 1}{wcs_name}", 1.0)
-            header.set(f"CRVAL{i + 1}{wcs_name}", s)
-            header.set(f"CUNIT{i + 1}{wcs_name}", "PIXEL")
-
-    def add_mask_schema_header(self, header: astropy.io.fits.Header, schema: MaskSchema) -> None:
-        """Modify a FITS header to include a description of a `MaskSchema`."""
-        if self.mask_header_style is MaskHeaderStyle.AFW:
-            for mask_plane_index, mask_plane in enumerate(schema):
-                if mask_plane is not None:
-                    header.set(
-                        keywords.AFW_MASK_PLANE.format(mask_plane.name.upper()),
-                        mask_plane_index,
-                        mask_plane.description,
-                    )
 
 
 @dataclasses.dataclass
@@ -246,17 +228,6 @@ class ExportFitsHeaderKey:
             serialization=pcs.wrap_serializer_function_ser_schema(self._serialize, info_arg=True),
         )
 
-    def _validate(
-        self, value: Any, handler: pydantic.ValidatorFunctionWrapHandler, info: pydantic.ValidationInfo
-    ) -> Any:
-        if read_context := ReadContext.from_info(info):
-            if header := read_context.primary_header:
-                if self.key in header:
-                    del header[self.key]
-
-    # TODO: we should have a _validate override too, to strip header keywords
-    # from the primary HDU so we can read what's left back in.
-
     def _serialize(
         self,
         obj: Any,
@@ -266,5 +237,5 @@ class ExportFitsHeaderKey:
         if write_context := WriteContext.from_info(info):
             header = astropy.io.fits.Header()
             header.set(f"HIERARCH {self.key}" if self.hierarch else self.key, obj, self.comment)
-            write_context.export_fits_header(header, for_read=False)
+            write_context.export_fits_header(header)
         return handler(obj)

@@ -151,12 +151,13 @@ class Image:
         if (write_context := WriteContext.from_info(info)) is None:
             raise WriteError("Cannot write image without WriteContext in Pydantic SerializationInfo.")
         header: astropy.io.fits.Header | None = None
-        if options := write_context.get_fits_write_options():
+        if write_context.get_fits_options():
             header = astropy.io.fits.Header()
-            options.add_array_start_wcs(header, [i.start for i in self.bbox])
             if self.unit is not None:
                 header["BUNIT"] = self.unit.to_string(format="fits")
-        data = write_context.add_array(self.array, header, use_wcs_default=True)
+        data = write_context.add_array(
+            self.array, header, start=[i.start for i in self.bbox], add_wcs_default=True
+        )
         return ImageReference.pack(data, [i.start for i in self.bbox], self.unit)
 
     @classmethod
@@ -164,7 +165,6 @@ class Image:
         cls, _core_schema: pcs.CoreSchema, handler: pydantic.GetJsonSchemaHandler
     ) -> pydantic.json_schema.JsonSchemaValue:
         return handler(ImageReference.__pydantic_core_schema__)
-
 
 class ImageReference(pydantic.BaseModel):
     """Pydantic model used to represent the serialized form of an `Image`."""

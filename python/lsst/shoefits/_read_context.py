@@ -18,7 +18,6 @@ from collections.abc import Callable, Mapping
 from contextlib import AbstractContextManager
 from typing import TYPE_CHECKING, Any, final
 
-import astropy.io.fits
 import numpy as np
 import pydantic
 
@@ -101,27 +100,6 @@ class ReadContext(ABC):
             mapping = {}
         mapping["shoefits.read_context"] = self
         return mapping
-
-    @property
-    def primary_header(self) -> astropy.io.fits.Header | None:
-        """The primary FITS header of the file being read, if it is available.
-
-        This is always `None` for non-FITS serialization formats (unless they
-        intentionally mimic FITS header storage) and may be `None` or empty for
-        object being read within `nested` contexts (where any header keys
-        written by these objects are not sent to the primary HDU).
-        """
-        return None
-
-    @abstractmethod
-    def nested(self) -> AbstractContextManager[None]:
-        """Return a context manager for a level of logical nesting in the
-        serializated form.
-
-        Any type that uses this context manager in validation/read must use
-        `WriteContext.nested` in the same way during serialization.
-        """
-        raise NotImplementedError()
 
     @abstractmethod
     def no_parameter_bbox(self) -> AbstractContextManager[None]:

@@ -62,10 +62,6 @@ class Adapter(Generic[_T, _S]):
 
     Adapters are also used by the `Polymorphic` annotation class to support
     cases where the set of possible runtime types is not known in advance.
-
-    The model type should usually not be a subclass of the `Model` intermediate
-    base class, because `Model` and `Adapter` both support frame nesting
-    and header updates, and these interact in usually-undesirable ways.
     """
 
     @property

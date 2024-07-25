@@ -74,7 +74,6 @@ class FitsReadContext(ReadContext):
             self._stream_has_fileno = False
         else:
             self._stream_has_fileno = True
-        self._header = astropy.io.fits.Header()
         self._fits: astropy.io.fits.HDUList = astropy.io.fits.open(
             self._stream,
             lazy_load_hdus=True,
@@ -87,18 +86,6 @@ class FitsReadContext(ReadContext):
         hdu = self._fits[0]
         tree_size = hdu.header.pop(keywords.TREE_SIZE)
         self._tree: JsonValue = json.loads(hdu.section[:tree_size].tobytes().decode())
-        # Strip out extension array-data addresses, since we don't use them at
-        # present.  If we reimplement the low-level reading ourselves using
-        # these (instead of delegating to astropy) we should be able to avoid
-        # doing O(N) seeks and header reads to find an array referenced by the
-        # tree.
-        n = 1
-        while hdu.header.pop(keywords.EXT_ADDRESS.format(n), None) is not None:
-            del hdu.header[keywords.EXT_LABEL.format(n)]
-            n += 1
-        self._header.update(hdu.header)
-        self._header.strip()
-        self._nesting_depth = 0
 
     def read(self, model_type: type[pydantic.BaseModel], component: str | None = None) -> Any:
         """Deserialize the stream.
@@ -133,22 +120,6 @@ class FitsReadContext(ReadContext):
         each component.
         """
         return tree[component]  # type: ignore[call-overload,index]
-
-    @property
-    def primary_header(self) -> astropy.io.fits.Header | None:
-        # Docstring inherited.
-        if self._nesting_depth == 0:
-            return self._header
-        return None
-
-    @contextmanager
-    def nested(self) -> Iterator[None]:
-        # Docstring inherited.
-        self._nesting_depth += 1
-        try:
-            yield
-        finally:
-            self._nesting_depth -= 1
 
     @contextmanager
     def no_parameter_bbox(self) -> Iterator[None]:

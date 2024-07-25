@@ -14,9 +14,12 @@ from ._adapter import Adapter
 from ._dtypes import FloatType, IntegerType, NumberType, SignedIntegerType, UnsignedIntegerType, is_unsigned
 from ._fits_options import (
     ExportFitsHeaderKey,
+    Fits,
     FitsCompression,
     FitsCompressionAlgorithm,
+    FitsHeaderPropagation,
     FitsOptions,
+    FitsOptionsDict,
     MaskHeaderStyle,
 )
 from ._fits_read_context import FitsReadContext
@@ -24,7 +27,7 @@ from ._fits_write_context import FORMAT_VERSION, FitsWriteContext
 from ._geom import Box, Interval
 from ._image import Image, ImageReference
 from ._mask import Mask, MaskPlane, MaskReference, MaskSchema
-from ._model import Frame, Model
+from ._model import Struct
 from ._polymorphic import (
     GetPolymorphicTag,
     Polymorphic,
