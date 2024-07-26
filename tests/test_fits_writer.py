@@ -43,16 +43,19 @@ def test_image_fits_write() -> None:
     stream = BytesIO()
     shf.FitsWriteContext(adapter_registry).write(s, stream)
     stream.seek(0)
-    hdu_list = astropy.io.fits.open(stream)
-    stream.seek(0)
-    buffer_bytes = stream.getvalue()
-    assert len(hdu_list) == 2
+    hdu_list = astropy.io.fits.open(stream, lazy_load_hdus=False)
+    assert len(hdu_list) == 3
     assert [int(k) for k in hdu_list[0].header["SHOEFITS"].split(".")] == list(shf.FORMAT_VERSION)
     assert hdu_list[0].header["ALPHA"] == s.alpha
-    primary_bytes = hdu_list[0].data.tobytes()
-    tree_size = hdu_list[0].header["TREESIZE"]
-    # Check that the tree address and size in the primary header are correct.
-    tree_str = primary_bytes[:tree_size].decode("utf-8")
+    # Check that the image HDU has the right data and header.
+    assert hdu_list[1].header["EXTNAME"] == "image"
+    assert hdu_list[1].header["CRVAL1A"] == s.image.bbox.x.start
+    assert hdu_list[1].header["CRVAL2A"] == s.image.bbox.y.start
+    np.testing.assert_array_equal(hdu_list[1].data, s.image.array)
+    # Check that the JSON/tree HDU is what we expect.
+    assert hdu_list[2].header["EXTNAME"] == "tree"
+    tree_bytes = hdu_list[2].data[0]["json"].tobytes()
+    tree_str = tree_bytes.decode()
     tree: shf.json_utils.JsonValue = json.loads(tree_str)
     match tree:
         case {"image": image_tree, "alpha": s.alpha, "beta": s.beta}:
@@ -75,19 +78,12 @@ def test_image_fits_write() -> None:
             pass
         case _:
             raise AssertionError(image_tree)
-    # Check that the image address in the header is correct.
-    assert hdu_list[0].header["LBL00001"] == "image,1"
-    image_address = hdu_list[0].header["ADR00001"]
-    array = np.frombuffer(
-        buffer_bytes[image_address : image_address + s.image.array.size * 2],
-        dtype=np.dtype(np.int16).newbyteorder(">"),
-    ).reshape(*s.image.array.shape)
-    np.testing.assert_array_equal(array, s.image.array)
-    # Check that the image HDU has the right data and header.
-    assert hdu_list[1].header["EXTNAME"] == "image"
-    assert hdu_list[1].header["CRVAL1A"] == s.image.bbox.x.start
-    assert hdu_list[1].header["CRVAL2A"] == s.image.bbox.y.start
-    np.testing.assert_array_equal(hdu_list[1].data, s.image.array)
+    # Test that the addresses we've stuffed into the headers are correct.
+    tree_address = hdu_list[0].header[shf.keywords.TREE_ADDRESS]
+    assert tree_address == hdu_list[0].filebytes() + hdu_list[1].filebytes()
+    assert hdu_list[2].header["LBL00001"] == "image,1"
+    image_address = hdu_list[2].header["ADR00001"]
+    assert image_address == hdu_list[0].filebytes() + len(hdu_list[1].header.tostring())
 
 
 def test_mask_fits_write() -> None:
@@ -102,7 +98,7 @@ def test_mask_fits_write() -> None:
     )
 
     class S(pydantic.BaseModel):
-        mask: Annotated[shf.Mask, shf.Fits(extname=None, mask_header_style="afw")]
+        mask: Annotated[shf.Mask, shf.Fits(extname="mask", mask_header_style="afw")]
 
     s = S(mask=shf.Mask(bbox=shf.Box.factory[1:5, -2:6], schema=mask_schema))
     s.mask.array[0, 0, :] = mask_schema.bitmask("bad", "interpolated")
@@ -112,15 +108,23 @@ def test_mask_fits_write() -> None:
     shf.FitsWriteContext(adapter_registry).write(s, buffer)
     buffer.seek(0)
     hdu_list = astropy.io.fits.open(buffer)
-    buffer.seek(0)
-    buffer_bytes = buffer.getvalue()
-    assert len(hdu_list) == 2
+    assert len(hdu_list) == 3
     assert [int(k) for k in hdu_list[0].header["SHOEFITS"].split(".")] == list(shf.FORMAT_VERSION)
     assert "MP_BAD" not in hdu_list[0].header
-    primary_bytes = hdu_list[0].data.tobytes()
-    tree_size = hdu_list[0].header["TREESIZE"]
-    # Check that the tree address and size in the primary header are correct.
-    tree_str = primary_bytes[:tree_size].decode("utf-8")
+    # Check that the mask HDU has the right data and header.
+    assert hdu_list[1].header["EXTNAME"] == "mask"
+    assert hdu_list[1].header["NAXIS1"] == s.mask.schema.mask_size
+    assert hdu_list[1].header["NAXIS2"] == s.mask.bbox.x.size
+    assert hdu_list[1].header["NAXIS3"] == s.mask.bbox.y.size
+    assert hdu_list[1].header["CRVAL2A"] == s.mask.bbox.x.start
+    assert hdu_list[1].header["CRVAL3A"] == s.mask.bbox.y.start
+    assert hdu_list[1].header["MP_BAD"] == 0
+    assert hdu_list[1].header["MP_INTERPOLATED"] == 2
+    np.testing.assert_array_equal(hdu_list[1].data, s.mask.array)
+    # Check that the JSON is what we expect.
+    assert hdu_list[2].header["EXTNAME"] == "tree"
+    tree_bytes = hdu_list[2].data[0]["json"].tobytes()
+    tree_str = tree_bytes.decode()
     tree: shf.json_utils.JsonValue = json.loads(tree_str)
     match tree:
         case {"mask": mask_tree}:
@@ -130,7 +134,7 @@ def test_mask_fits_write() -> None:
     match mask_tree:
         case {
             "data": {
-                "source": "fits:2",
+                "source": "fits:mask,1",
                 "shape": [4, 8, 2],
                 "datatype": "uint8",
                 "byteorder": "big",
@@ -141,23 +145,10 @@ def test_mask_fits_write() -> None:
             pass
         case _:
             raise AssertionError(mask_tree)
-    assert len(planes_list) == len(mask_schema)
-    assert shf.MaskPlane(**cast(dict, planes_list[0])) == mask_schema[0]
-    assert planes_list[1] is None
-    # Check that the image address in the tree is correct.
-    assert hdu_list[0].header["LBL00001"] == 2
-    image_address = hdu_list[0].header["ADR00001"]
-    array = np.frombuffer(
-        buffer_bytes[image_address : image_address + s.mask.array.size],
-        dtype=np.dtype(np.uint8).newbyteorder(">"),
-    ).reshape(*s.mask.array.shape)
-    np.testing.assert_array_equal(array, s.mask.array)
-    # Check that the mask HDU has the right data and header.
-    assert hdu_list[1].header["NAXIS1"] == s.mask.schema.mask_size
-    assert hdu_list[1].header["NAXIS2"] == s.mask.bbox.x.size
-    assert hdu_list[1].header["NAXIS3"] == s.mask.bbox.y.size
-    assert hdu_list[1].header["CRVAL2A"] == s.mask.bbox.x.start
-    assert hdu_list[1].header["CRVAL3A"] == s.mask.bbox.y.start
-    assert hdu_list[1].header["MP_BAD"] == 0
-    assert hdu_list[1].header["MP_INTERPOLATED"] == 2
-    np.testing.assert_array_equal(hdu_list[1].data, s.mask.array)
+    # Check that the tree address and size in the primary header are correct.
+    # Test that the addresses we've stuffed into the headers are correct.
+    tree_address = hdu_list[0].header[shf.keywords.TREE_ADDRESS]
+    assert tree_address == hdu_list[0].filebytes() + hdu_list[1].filebytes()
+    assert hdu_list[2].header["LBL00001"] == "mask,1"
+    image_address = hdu_list[2].header["ADR00001"]
+    assert image_address == hdu_list[0].filebytes() + len(hdu_list[1].header.tostring())

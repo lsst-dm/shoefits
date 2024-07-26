@@ -214,7 +214,8 @@ class FitsWriteContext(WriteContext):
         self._frames.primary_header.set(
             keywords.FORMAT_VERSION, ".".join(str(v) for v in FORMAT_VERSION), "SHOEFITS format version."
         )
-        self._frames.primary_header["EXTNAME"] = "INDEX"
+        self._tree_header = astropy.io.fits.Header()
+        self._tree_header["EXTNAME"] = "tree"
         self._extensions: list[_FitsExtension] = []
         self._adapter_registry = polymorphic_adapter_registry
         self._extname_counter: Counter[str] = Counter()
@@ -238,15 +239,9 @@ class FitsWriteContext(WriteContext):
             `None` for minimal whitespace.
         """
         tree_str = root.model_dump_json(indent=indent, context=self.inject())
-        asdf_buffer = BytesIO()
-        asdf_buffer.write(tree_str.encode())
-        tree_size = asdf_buffer.tell()
-        asdf_array = np.frombuffer(asdf_buffer.getbuffer(), dtype=np.uint8)
-        primary_hdu = astropy.io.fits.PrimaryHDU(asdf_array, header=self._frames.primary_header)
-        primary_hdu.header.set(keywords.TREE_SIZE, tree_size, "Size of tree in bytes.")
+        primary_hdu = astropy.io.fits.PrimaryHDU(None, header=self._frames.primary_header)
+        primary_hdu.header[keywords.TREE_ADDRESS] = 0  # placeholder
         hdu_list = astropy.io.fits.HDUList([primary_hdu])
-        # There's no method to get the size of the header without stringifying
-        # it, so that's what we do (here and later).
         address = primary_hdu.filebytes()
         for index, extension in enumerate(self._extensions):
             header = extension.make_full_header()
@@ -264,9 +259,16 @@ class FitsWriteContext(WriteContext):
                 )
             else:
                 hdu = astropy.io.fits.ImageHDU(extension.array, header)
-            primary_hdu.header[keywords.EXT_ADDRESS.format(index + 1)] = address + len(hdu.header.tostring())
+            self._tree_header[keywords.EXT_ADDRESS.format(index + 1)] = address + len(hdu.header.tostring())
             address += hdu.filebytes()
             hdu_list.append(hdu)
+        primary_hdu.header[keywords.TREE_ADDRESS] = address
+        json_buffer = BytesIO()
+        json_buffer.write(tree_str.encode())
+        json_array = np.frombuffer(json_buffer.getbuffer(), dtype=np.uint8)
+        json_column = astropy.io.fits.Column("json", format="PB()", array=json_array[np.newaxis, :])
+        json_hdu = astropy.io.fits.BinTableHDU.from_columns([json_column], header=self._tree_header)
+        hdu_list.append(json_hdu)
         hdu_list.writeto(stream)  # TODO: make space for, then add checksums
 
     def get_fits_options(self) -> FitsOptions:
@@ -305,14 +307,14 @@ class FitsWriteContext(WriteContext):
         header = astropy.io.fits.Header()
         if isinstance(label, keywords.FitsExtensionLabel):
             label.update_header(header)
-            self._frames.primary_header.set(
+            self._tree_header.set(
                 keywords.EXT_LABEL.format(ext_index),
                 str(label),
                 "Label for extension used in tree.",
             )
             self._extname_counter[label.extname] += 1
         else:
-            self._frames.primary_header.set(
+            self._tree_header.set(
                 keywords.EXT_LABEL.format(ext_index),
                 label,
                 "Label for extension used in tree.",
@@ -328,9 +330,7 @@ class FitsWriteContext(WriteContext):
         )
         extension.start = start
         self._extensions.append(extension)
-        self._frames.primary_header.set(
-            keywords.EXT_ADDRESS.format(ext_index), 0, "Address of extension data."
-        )
+        self._tree_header.set(keywords.EXT_ADDRESS.format(ext_index), 0, "Address of extension data.")
         return ArrayReferenceModel(
             source=f"fits:{label}", shape=list(array.shape), datatype=NumberType.from_numpy(array.dtype)
         )

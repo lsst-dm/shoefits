@@ -22,7 +22,7 @@ import astropy.io.fits
 import numpy as np
 import pydantic
 
-from . import asdf_utils, keywords
+from . import asdf_utils
 from ._geom import Box
 from ._polymorphic import PolymorphicAdapterRegistry
 from ._read_context import ReadContext
@@ -80,12 +80,8 @@ class FitsReadContext(ReadContext):
             memmap=False,
             cache=False,
         )
-        # The tree size header is some future-proofing for the possibility of
-        # writing ASDF data blacks after the tree as part of the same HDU.  At
-        # present, it's identical to NAXIS1.
-        hdu = self._fits[0]
-        tree_size = hdu.header.pop(keywords.TREE_SIZE)
-        self._tree: JsonValue = json.loads(hdu.section[:tree_size].tobytes().decode())
+        tree_hdu: astropy.io.fits.BinTableHDU = self._fits["tree"]
+        self._tree: JsonValue = json.loads(tree_hdu.data[0]["json"].tobytes().decode())
 
     def read(self, model_type: type[pydantic.BaseModel], component: str | None = None) -> Any:
         """Deserialize the stream.
@@ -108,7 +104,7 @@ class FitsReadContext(ReadContext):
         if component is None:
             tree = self._tree
         else:
-            tree = self.seek_component(tree, component)
+            tree = self.seek_component(self._tree, component)
         return model_type.model_validate(tree, context=self.inject())
 
     def seek_component(self, tree: JsonValue, component: str) -> JsonValue:
