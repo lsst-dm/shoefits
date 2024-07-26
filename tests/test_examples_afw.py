@@ -156,13 +156,14 @@ def test_exposure_fits_wcs() -> None:
     shf.FitsWriteContext(adapter_registry).write(exposure_in, stream, indent=2)
     stream.seek(0)
     fits = astropy.io.fits.open(stream)
+    assert len(fits) == 5
+    assert fits[1].header["EXTNAME"] == "image"
+    assert fits[2].header["EXTNAME"] == "mask"
+    assert fits[3].header["EXTNAME"] == "variance"
+    assert fits[4].header["EXTNAME"] == "tree"
     # FITS WCS should not be exported to the primary header, as it doesn't have
     # the right NAXES.
     assert "CRPIX1" not in fits[0].header
-    # Same for the HDU that holds the PhotoCalib's bounded field coordinates.
-    # TODO we can't use EXTNAME for this because it doesn't have one.
-    # It'd be best if it wasn't an HDU to begin with.
-    assert "CRPIX1" not in fits[1].header
     # FITS WCS should be present in all other headers.
     assert_wcs_equal(exposure_in.wcs, astropy.wcs.WCS(fits["image"].header))
     # Mask has a 3-d array, but we only need the WCS for the first two

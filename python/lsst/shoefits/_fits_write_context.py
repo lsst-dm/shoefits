@@ -29,7 +29,7 @@ from . import keywords
 from ._dtypes import NumberType
 from ._fits_options import FitsCompression, FitsOptions, FitsOptionsDict
 from ._write_context import WriteContext, WriteError
-from .asdf_utils import ArrayReferenceModel
+from .asdf_utils import ArrayModel, ArrayReferenceModel, ArraySerialization
 
 if TYPE_CHECKING:
     from ._polymorphic import PolymorphicAdapterRegistry
@@ -300,25 +300,20 @@ class FitsWriteContext(WriteContext):
         fits_header: astropy.io.fits.Header | None = None,
         start: Sequence[int] | None = None,
         add_wcs_default: bool = False,
-    ) -> ArrayReferenceModel:
+    ) -> ArrayModel:
         # Docstring inherited.
         label = self._get_next_extension_label()
+        if label is None:
+            return ArraySerialization.to_model(array)
         ext_index = len(self._extensions) + 1
         header = astropy.io.fits.Header()
-        if isinstance(label, keywords.FitsExtensionLabel):
-            label.update_header(header)
-            self._tree_header.set(
-                keywords.EXT_LABEL.format(ext_index),
-                str(label),
-                "Label for extension used in tree.",
-            )
-            self._extname_counter[label.extname] += 1
-        else:
-            self._tree_header.set(
-                keywords.EXT_LABEL.format(ext_index),
-                label,
-                "Label for extension used in tree.",
-            )
+        label.update_header(header)
+        self._tree_header.set(
+            keywords.EXT_LABEL.format(ext_index),
+            str(label),
+            "Label for extension used in tree.",
+        )
+        self._extname_counter[label.extname] += 1
         header.update(fits_header)
         options = self.get_fits_options()
         if options.compression:
@@ -335,13 +330,11 @@ class FitsWriteContext(WriteContext):
             source=f"fits:{label}", shape=list(array.shape), datatype=NumberType.from_numpy(array.dtype)
         )
 
-    def _get_next_extension_label(self) -> keywords.FitsExtensionLabel | int:
+    def _get_next_extension_label(self) -> keywords.FitsExtensionLabel | None:
         options = self._frames.options
         if options.extname is not None:
             return keywords.FitsExtensionLabel(
                 options.extname,
                 extver=self._extname_counter[options.extname] + 1,
             )
-        # Add one for FITS 1-indexed integer convention, add another one since
-        # we haven't added this one yet.
-        return len(self._extensions) + 2
+        return None

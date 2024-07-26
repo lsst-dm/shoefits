@@ -136,11 +136,8 @@ class FitsReadContext(ReadContext):
         match array_model:
             case asdf_utils.ArrayReferenceModel(source=str(fits_source)) if fits_source.startswith("fits:"):
                 fits_source = fits_source.removeprefix("fits:")
-                if fits_source.isnumeric():
-                    hdu_index = int(fits_source) - 1
-                else:
-                    name, ver = fits_source.split(",")
-                    hdu_index = self._fits.index_of((name, int(ver)))
+                name, ver = fits_source.split(",")
+                hdu_index = self._fits.index_of((name, int(ver)))
             case asdf_utils.ArrayReferenceModel(source=int()):
                 raise NotImplementedError("ASDF blocks are not supported by this reader.")
             case asdf_utils.InlineArrayModel(data=data, datatype=type_enum):

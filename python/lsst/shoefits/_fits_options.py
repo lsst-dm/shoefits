@@ -64,6 +64,8 @@ class FitsOptions:
     """The ``EXTNAME`` header key to use for the FITS extension that holds this
     object's data.
 
+    If `None`, arrays are stored in-line in the JSON.
+
     When multiple fields end up with the same ``EXTNAME`` in a single FITS
     file, they are automatically assigned different ``EXTVER`` values, counting
     up from the first encountered in depth-first order.  This guarantees
