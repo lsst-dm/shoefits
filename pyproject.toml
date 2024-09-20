@@ -6,11 +6,11 @@ build-backend = "setuptools.build_meta"
 name = "shoefits"
 requires-python = ">=3.11.0"
 description = "Schema-based Hierarchical Object Embedding in FITS."
-license = {text = "BSD 3-Clause License"}
+license = { text = "BSD 3-Clause License" }
 readme = "README.md"
 authors = [
-    {name="Jim Bosch", email="jbosch@astro.princeton.edu"},
-    {name="Rubin Observatory Data Management", email="dm-admin@lists.lsst.org"},
+    { name = "Jim Bosch", email = "jbosch@astro.princeton.edu" },
+    { name = "Rubin Observatory Data Management", email = "dm-admin@lists.lsst.org" },
 ]
 classifiers = [
     "Intended Audience :: Science/Research",
@@ -35,10 +35,7 @@ dynamic = ["version"]
 "Homepage" = "https://github.com/lsst-dm/shoefits"
 
 [project.optional-dependencies]
-test = [
-    "pytest >= 8.2",
-    "jsonschema >= 4.20",
-]
+test = ["pytest >= 8.2", "jsonschema >= 4.20"]
 # Also expose the optional dependencies of lsst-resources as optional
 # dependencies.  This package doesn't care what resource methods are available,
 # but downstream code may view it as a black box and lsst-resources as an
@@ -49,42 +46,42 @@ https = ["lsst-resources[https]"]
 gs = ["lsst-resources[gs]"]
 
 [tool.towncrier]
-    package = "lsst.shoefits"
-    package_dir = "python"
-    filename = "doc/lsst.shoefits/CHANGES.rst"
-    directory = "doc/changes"
-    title_format = "Resources {version} {project_date}"
-    issue_format = "`{issue} <https://jira.lsstcorp.org/browse/{issue}>`_"
+package = "lsst.shoefits"
+package_dir = "python"
+filename = "doc/lsst.shoefits/CHANGES.rst"
+directory = "doc/changes"
+title_format = "Resources {version} {project_date}"
+issue_format = "`{issue} <https://jira.lsstcorp.org/browse/{issue}>`_"
 
-    [[tool.towncrier.type]]
-        directory = "feature"
-        name = "New Features"
-        showcontent = true
+[[tool.towncrier.type]]
+directory = "feature"
+name = "New Features"
+showcontent = true
 
-    [[tool.towncrier.type]]
-        directory = "api"
-        name = "API Changes"
-        showcontent = true
+[[tool.towncrier.type]]
+directory = "api"
+name = "API Changes"
+showcontent = true
 
-    [[tool.towncrier.type]]
-        directory = "bugfix"
-        name = "Bug Fixes"
-        showcontent = true
+[[tool.towncrier.type]]
+directory = "bugfix"
+name = "Bug Fixes"
+showcontent = true
 
-    [[tool.towncrier.type]]
-        directory = "perf"
-        name = "Performance Enhancement"
-        showcontent = true
+[[tool.towncrier.type]]
+directory = "perf"
+name = "Performance Enhancement"
+showcontent = true
 
-    [[tool.towncrier.type]]
-        directory = "misc"
-        name = "Miscellaneous Changes of Minor Interest"
-        showcontent = true
+[[tool.towncrier.type]]
+directory = "misc"
+name = "Miscellaneous Changes of Minor Interest"
+showcontent = true
 
-    [[tool.towncrier.type]]
-        directory = "removal"
-        name = "An API Removal or Deprecation"
-        showcontent = true
+[[tool.towncrier.type]]
+directory = "removal"
+name = "An API Removal or Deprecation"
+showcontent = true
 
 [tool.setuptools.packages.find]
 where = ["python"]
@@ -121,9 +118,19 @@ exclude_lines = [
     "if TYPE_CHECKING:",
 ]
 
+[tool.black]
+line-length = 110
+target-version = ["py312"]
+
+[tool.isort]
+profile = "black"
+line_length = 110
+known_first_party = ["lsst"]
+known_local_folder = ["python"]
+
 [tool.ruff]
 line-length = 110
-target-version = "py311"
+target-version = "py312"
 
 [tool.ruff.lint]
 ignore = [
@@ -142,21 +149,16 @@ ignore = [
     "D200",
     "D205",
     "D400",
-    "UP007",  # Allow UNION in type annotation
+    "UP007", # Allow UNION in type annotation
 ]
 select = [
     "E",  # pycodestyle
     "F",  # pycodestyle
-    "I",  # import sorting
     "N",  # pep8-naming
     "W",  # pycodestyle
     "D",  # pydocstyle
-    "UP",  # pyupgrade
+    "UP", # pyupgrade
 ]
-
-[tool.ruff.lint.isort]
-known-first-party = ["lsst"]
-known-local-folder = ["python"]
 
 [tool.ruff.lint.pycodestyle]
 max-doc-length = 79

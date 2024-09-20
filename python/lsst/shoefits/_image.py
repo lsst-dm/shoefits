@@ -166,6 +166,7 @@ class Image:
     ) -> pydantic.json_schema.JsonSchemaValue:
         return handler(ImageReference.__pydantic_core_schema__)
 
+
 class ImageReference(pydantic.BaseModel):
     """Pydantic model used to represent the serialized form of an `Image`."""
 
