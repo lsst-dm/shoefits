@@ -177,7 +177,7 @@ class _FitsExtension:
             add_wcs(full_wcs_map, astropy.wcs.WCS(offset_wcs_data), self.options.offset_wcs_key)
         if full_wcs_map:
             for key in sorted(full_wcs_map.keys()):
-                full_header.update(full_wcs_map[key].to_header(key=key))
+                full_header.extend(full_wcs_map[key].to_header(key=key))
         return full_header
 
 
@@ -285,7 +285,7 @@ class FitsWriteContext(WriteContext):
     def export_fits_header(self, header: astropy.io.fits.Header) -> None:
         # Docstring inherited.
         frame = self._frames.top()
-        frame.header.update(header)
+        frame.header.extend(header, update=True)
 
     def export_fits_wcs(self, wcs: astropy.wcs.WCS, key: str | None = None) -> None:
         # Docstring inherited.
@@ -306,22 +306,23 @@ class FitsWriteContext(WriteContext):
         if label is None:
             return ArraySerialization.to_model(array)
         ext_index = len(self._extensions) + 1
-        header = astropy.io.fits.Header()
-        label.update_header(header)
+        ext_header = astropy.io.fits.Header()
+        label.update_header(ext_header)
         self._tree_header.set(
             keywords.EXT_LABEL.format(ext_index),
             str(label),
             "Label for extension used in tree.",
         )
         self._extname_counter[label.extname] += 1
-        header.update(fits_header)
+        if fits_header is not None:
+            ext_header.extend(fits_header)
         options = self.get_fits_options()
         if options.compression:
             raise NotImplementedError("FITS compression is not yet supported.")
         extension = self._frames.make_extension(
             array,
             add_wcs=(options.add_wcs if options.add_wcs is not None else add_wcs_default),
-            header=header,
+            header=ext_header,
         )
         extension.start = start
         self._extensions.append(extension)

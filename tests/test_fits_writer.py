@@ -15,7 +15,7 @@ __all__ = ()
 
 import json
 from io import BytesIO
-from typing import Annotated, cast
+from typing import Annotated
 
 import astropy.io.fits
 import astropy.units as u
@@ -140,7 +140,7 @@ def test_mask_fits_write() -> None:
                 "byteorder": "big",
             },
             "start": [1, -2],
-            "planes": list(planes_list),
+            "planes": list(),
         }:
             pass
         case _:

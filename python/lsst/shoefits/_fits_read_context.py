@@ -80,7 +80,7 @@ class FitsReadContext(ReadContext):
             memmap=False,
             cache=False,
         )
-        tree_hdu: astropy.io.fits.BinTableHDU = self._fits["tree"]
+        tree_hdu = self._fits["tree"]
         self._tree: JsonValue = json.loads(tree_hdu.data[0]["json"].tobytes().decode())
 
     def read(self, model_type: type[pydantic.BaseModel], component: str | None = None) -> Any:
@@ -130,7 +130,7 @@ class FitsReadContext(ReadContext):
         self,
         array_model: asdf_utils.ArrayModel,
         bbox_from_shape: Callable[[tuple[int, ...]], Box] = Box.from_shape,
-        slice_result: Callable[[Box], tuple[slice, ...]] | None = None,
+        slices_from_bbox: Callable[[Box], tuple[slice, ...]] | None = None,
     ) -> np.ndarray:
         # Docstring inherited.
         match array_model:
@@ -146,17 +146,17 @@ class FitsReadContext(ReadContext):
                 # whereas in other cases we do partial reads when slicing.
                 array: np.ndarray = np.array(data, dtype=type_enum.to_numpy())
                 full_bbox = bbox_from_shape(array.shape)
-                if slice_result is None:
+                if slices_from_bbox is None:
                     return array
                 else:
-                    return array[slice_result(full_bbox)]
+                    return array[slices_from_bbox(full_bbox)]
             case _:
                 raise AssertionError()
         full_bbox = bbox_from_shape(tuple(array_model.shape))
-        if slice_result is None:
+        if slices_from_bbox is None:
             array = self._fits[hdu_index].data
         else:
-            array = self._fits[hdu_index].section(slice_result(full_bbox))
+            array = self._fits[hdu_index].section[slices_from_bbox(full_bbox)]
         # Logic below tries to avoid unnecessary copies, but to avoid them
         # entirely, we'd have to move this to a compiled language.
         if not array.flags.aligned or not array.flags.writeable:

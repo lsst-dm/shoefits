@@ -57,7 +57,7 @@ class TestingWriteContext(WriteContext):
     def add_array(
         self,
         array: np.ndarray,
-        header: astropy.io.fits.Header | None = None,
+        fits_header: astropy.io.fits.Header | None = None,
         start: Sequence[int] | None = None,
         add_wcs_default: bool = False,
     ) -> asdf_utils.ArrayReferenceModel:

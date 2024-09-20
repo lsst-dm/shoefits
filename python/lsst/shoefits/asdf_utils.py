@@ -144,7 +144,7 @@ ArrayModel: TypeAlias = Annotated[
 ]
 
 
-ArrayModelAdapter = pydantic.TypeAdapter(ArrayModel)
+ArrayModelAdapter: pydantic.TypeAdapter[ArrayModel] = pydantic.TypeAdapter(ArrayModel)
 
 
 class ArraySerialization:
@@ -212,7 +212,7 @@ Array: TypeAlias = Annotated[np.ndarray, ArraySerialization]
 class QuantityModel(pydantic.BaseModel):
     """Model for the subset of the ASDF 'quantity' schema used by shoefits."""
 
-    value: ArrayModel | float
+    value: ArrayModel | pydantic.StrictFloat
     unit: Unit
 
     model_config = pydantic.ConfigDict(
@@ -246,7 +246,7 @@ class QuantitySerialization:
         )
 
     @classmethod
-    def from_model(cls, model: QuantityModel, info: pydantic.ValidationInfo) -> np.ndarray:
+    def from_model(cls, model: QuantityModel, info: pydantic.ValidationInfo) -> astropy.units.Quantity:
         if isinstance(model.value, float):
             return astropy.units.Quantity(model.value, unit=model.unit)
         return astropy.units.Quantity(ArraySerialization.from_model(model.value, info), unit=model.unit)
