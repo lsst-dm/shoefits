@@ -97,9 +97,9 @@ class TestingReadContext(ReadContext):
         self,
         array_model: asdf_utils.ArrayModel,
         bbox_from_shape: Callable[[tuple[int, ...]], Box] = Box.from_shape,
-        slice_result: Callable[[Box], tuple[slice, ...]] | None = None,
+        slices_from_bbox: Callable[[Box], tuple[slice, ...]] | None = None,
     ) -> np.ndarray:
-        assert slice_result is None
+        assert slices_from_bbox is None
         match array_model:
             case asdf_utils.InlineArrayModel():
                 return np.array(array_model.data, dtype=array_model.datatype.to_numpy())
